@@ -78,7 +78,10 @@ details.logbox summary{cursor:pointer;color:var(--muted);font-size:13.5px}
 
 /* ---------- 지도 화면 ---------- */
 #mapView{background:#E9ECEE}
-#map{position:absolute;top:0;right:0;bottom:0;left:0;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;
+/* 네이버 지도 SDK는 지도 div에 style="position:relative"를 직접 붙인다. 그래서 지도 div 자체를 absolute로 배치하면
+   높이가 0이 되어 지도가 보이지 않는다. → 바깥 틀(#mapWrap)이 자리를 잡고, 지도 div는 그 안을 100%로 채운다. */
+#mapWrap{position:absolute;top:0;right:0;bottom:0;left:0;z-index:0;overflow:hidden}
+#map{width:100%;height:100%;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;
   color-scheme:only light}                          /* 브라우저 다크 모드가 지도를 억지로 어둡게 칠하지 않도록 */
 #map img{-webkit-user-drag:none}
 .mtop{position:absolute;left:0;right:0;top:0;z-index:30;display:flex;gap:8px;align-items:flex-start;pointer-events:none;
@@ -188,7 +191,7 @@ body.labels .pt .lbl{display:block}
 
 <!-- ===== 지도 화면 ===== -->
 <section id="mapView" class="view" aria-label="지도">
-  <div id="map"></div>
+  <div id="mapWrap"><div id="map"></div></div>
   <div id="mapLoading">지도를 불러오는 중…</div>
   <div class="mtop">
     <div class="pill">
@@ -733,6 +736,12 @@ function createMap() {
     if (!pressHandled && e && e.coord) { suppressClickUntil = Date.now() + 800; showAddressAt(e.coord); }
   });
   setupLongPress($("#map"));
+  setTimeout(() => {
+    const el = $("#map");
+    if ($("#mapView").classList.contains("active") && (el.offsetWidth < 10 || el.offsetHeight < 10)) {
+      log(`지도 영역 크기가 ${el.offsetWidth}×${el.offsetHeight}로 잡혀 지도가 보이지 않습니다.`, "err");
+    }
+  }, 1500);
   new ResizeObserver(() => { if (map && typeof map.autoResize === "function") map.autoResize(); }).observe($("#map"));
 }
 
