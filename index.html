@@ -1,0 +1,1240 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0A6E4F">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="color-scheme" content="light dark">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<title>공사 노선 지도</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  color-scheme: light;
+  --bg:#F2F4F5; --panel:#FFFFFF; --ink:#1B2329; --muted:#5B6770; --line:#D3D9DE;
+  --accent:#0A6E4F; --accent-ink:#FFFFFF; --soft:#E7F1EC; --blue:#1F6FEB;
+  --warn:#9A4A06; --warn-bg:#FFF4E5; --err:#B3261E; --err-bg:#FDECEA;
+  --shadow:0 2px 10px rgba(0,0,0,.18);
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    color-scheme: dark;
+    --bg:#13181B; --panel:#1A2125; --ink:#E5EAED; --muted:#98A4AC; --line:#2D383F;
+    --accent:#35A87E; --accent-ink:#06140E; --soft:#1F3029;
+    --warn:#F0B070; --warn-bg:#2E2418; --err:#F29A90; --err-bg:#331D1B;
+    --shadow:0 2px 12px rgba(0,0,0,.5);
+  }
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;margin:0}
+body{font-family:"IBM Plex Sans KR","Apple SD Gothic Neo","Malgun Gothic",system-ui,sans-serif;background:var(--bg);color:var(--ink);
+  font-size:15px;line-height:1.5;overflow:hidden;-webkit-text-size-adjust:100%}
+button{font:inherit;color:inherit;cursor:pointer;touch-action:manipulation}
+html,body{overscroll-behavior:none}                 /* 안드로이드 크롬: 당겨서 새로고침 방지 */
+button:focus-visible,input:focus-visible,label:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.view{position:fixed;top:0;right:0;bottom:0;left:0;display:none}
+.view.active{display:block}
+
+/* ---------- 공사 목록 화면 ---------- */
+#listView{overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior-y:contain}
+.list-wrap{max-width:640px;margin:0 auto;min-height:100%}
+.list-head{position:sticky;top:0;z-index:2;background:var(--panel);border-bottom:1px solid var(--line);
+  padding:calc(16px + env(safe-area-inset-top,0px)) 18px 12px}
+.list-head h1{margin:0;font-size:21px;font-weight:600;letter-spacing:-0.01em}
+.list-head .sub{margin-top:2px;color:var(--muted);font-size:13px}
+#search{margin-top:12px;width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink);font:inherit;font-size:16px}
+.projects{list-style:none;margin:0;padding:12px;display:flex;flex-direction:column;gap:8px}
+.proj{display:flex;align-items:center;gap:12px;width:100%;min-height:68px;padding:12px 14px;text-align:left;
+  background:var(--panel);border:1px solid var(--line);border-radius:12px}
+.proj:active{background:var(--soft)}
+.proj .bar{width:4px;align-self:stretch;border-radius:2px;background:var(--c)}
+.proj .txt{flex:1;min-width:0}
+.proj .t{display:block;font-size:16px;font-weight:600;word-break:keep-all}
+.proj .d{display:block;margin-top:2px;font-size:13px;color:var(--muted)}
+.proj .chev{color:var(--muted);flex:none}
+.empty{padding:28px 18px;color:var(--muted);text-align:center}
+.list-foot{padding:4px 12px calc(28px + env(safe-area-inset-bottom,0px));display:flex;flex-direction:column;gap:10px}
+.btn{display:flex;align-items:center;justify-content:center;gap:6px;min-height:46px;padding:8px 14px;border:1px solid var(--line);
+  border-radius:10px;background:var(--panel);color:var(--ink);font:inherit;font-size:15px;cursor:pointer}
+.btn.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:500}
+.btn[aria-disabled=true],.btn:disabled{opacity:.45;pointer-events:none}
+#keyBox{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px}
+#keyBox label{display:block;font-size:14px;margin-bottom:6px}
+#keyInput{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink);font:inherit;font-size:16px}
+.hint{color:var(--muted);font-size:12.5px;margin:8px 0 0}
+#fileInput{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+details.logbox{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 14px}
+details.logbox summary{cursor:pointer;color:var(--muted);font-size:13.5px}
+.log{list-style:none;margin:8px 0 0;padding:0;display:flex;flex-direction:column;gap:6px;font-size:12.5px}
+.log li{padding:6px 8px;border-radius:6px;background:var(--bg);word-break:break-all}
+.log li.warn{background:var(--warn-bg);color:var(--warn)}
+.log li.err{background:var(--err-bg);color:var(--err)}
+
+/* ---------- 지도 화면 ---------- */
+#mapView{background:#E9ECEE}
+#map{position:absolute;top:0;right:0;bottom:0;left:0;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;
+  color-scheme:only light}                          /* 브라우저 다크 모드가 지도를 억지로 어둡게 칠하지 않도록 */
+#map img{-webkit-user-drag:none}
+.mtop{position:absolute;left:0;right:0;top:0;z-index:30;display:flex;gap:8px;align-items:flex-start;pointer-events:none;
+  padding:calc(10px + env(safe-area-inset-top,0px)) calc(12px + env(safe-area-inset-right,0px)) 0 calc(12px + env(safe-area-inset-left,0px))}
+.mtop > *{pointer-events:auto}
+.pill{flex:1;min-width:0;height:48px;display:flex;align-items:center;gap:2px;padding:0 14px 0 4px;border-radius:24px;
+  background:var(--panel);color:var(--ink);box-shadow:var(--shadow)}
+.pill .back{width:42px;height:42px;border:0;background:transparent;border-radius:50%;display:flex;align-items:center;justify-content:center;flex:none}
+.pill .name{flex:1;min-width:0;font-weight:600;font-size:15.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rcol{display:flex;flex-direction:column;gap:8px}
+.fab{width:48px;height:48px;border:0;border-radius:50%;background:var(--panel);color:var(--ink);box-shadow:var(--shadow);
+  display:flex;align-items:center;justify-content:center;flex:none}
+.fab:active{filter:brightness(.94)}
+#locBtn{position:absolute;right:calc(12px + env(safe-area-inset-right,0px));bottom:calc(30px + env(safe-area-inset-bottom,0px));z-index:30;transition:bottom .18s}
+#locBtn.track{color:var(--blue)}
+#locBtn.follow{background:var(--blue);color:#fff}
+#mapLoading{position:absolute;top:0;right:0;bottom:0;left:0;display:flex;align-items:center;justify-content:center;color:var(--muted);z-index:5;pointer-events:none}
+
+/* 하단 정보 카드 */
+#card{position:absolute;left:calc(8px + env(safe-area-inset-left,0px));right:calc(8px + env(safe-area-inset-right,0px));
+  bottom:calc(8px + env(safe-area-inset-bottom,0px));z-index:40;max-height:55%;overflow:auto;display:none;
+  background:var(--panel);color:var(--ink);border-radius:16px;box-shadow:0 -2px 20px rgba(0,0,0,.22);padding:14px 16px 16px}
+#card.show{display:block}
+#card .top{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+#card .ttl{font-size:17px;font-weight:600;word-break:break-all}
+#card .close{border:0;background:transparent;font-size:24px;line-height:1;padding:0 4px;color:var(--muted)}
+#card .meta{color:var(--muted);font-size:13px;margin-top:3px;word-break:break-all}
+#card .measure{margin-top:8px;font-weight:500}
+#card .measure small{display:block;font-weight:400;color:var(--muted);font-size:12px}
+#card table{border-collapse:collapse;width:100%;margin-top:8px;font-size:13px}
+#card td{border-top:1px solid var(--line);padding:5px 6px 5px 0;vertical-align:top;word-break:break-all}
+#card td:first-child{color:var(--muted);white-space:nowrap;padding-right:10px}
+#card .desc{margin-top:8px;font-size:13.5px;overflow-x:auto}
+#card .desc.plain{white-space:pre-line}
+#card .actions{display:flex;gap:8px;margin-top:12px}
+#card .actions .btn{flex:1;min-height:42px;font-size:14px}
+.coord{margin-top:6px;font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
+
+/* 레이어 메뉴 (아래에서 올라오는 시트) */
+#menuBack{position:fixed;top:0;right:0;bottom:0;left:0;z-index:60;background:rgba(0,0,0,.35);display:none}
+#menu{position:fixed;left:0;right:0;bottom:0;z-index:61;max-height:82vh;max-height:82dvh;overflow:auto;-webkit-overflow-scrolling:touch;
+  background:var(--panel);color:var(--ink);border-radius:18px 18px 0 0;transform:translateY(105%);transition:transform .22s ease;
+  padding:6px 16px calc(18px + env(safe-area-inset-bottom,0px))}
+body.menu-open #menu{transform:none}
+body.menu-open #menuBack{display:block}
+.grab{width:40px;height:4px;border-radius:2px;background:var(--line);margin:6px auto 10px}
+#menu h2{font-size:14px;font-weight:600;color:var(--muted);margin:14px 0 8px}
+.seg{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+.seg button{min-height:42px;border:1px solid var(--line);border-radius:10px;background:var(--panel);font-size:13.5px}
+.seg button.on{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:500}
+.sw{display:flex;align-items:center;justify-content:space-between;min-height:46px;border-bottom:1px solid var(--line);font-size:15px;cursor:pointer}
+.sw input{width:20px;height:20px;accent-color:var(--accent)}
+#layers{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+#layers .layer{display:flex;align-items:center;gap:10px;border:1px solid var(--line);border-left:4px solid var(--c);border-radius:10px;padding:8px 10px}
+#layers .layer.off{opacity:.5}
+#layers .info{flex:1;min-width:0}
+#layers .nm{font-weight:500;word-break:break-all;font-size:14px}
+#layers .cnt{font-size:12px;color:var(--muted)}
+#layers button{min-height:36px;padding:4px 10px;border:1px solid var(--line);border-radius:8px;background:var(--panel);font-size:13px}
+#layers .none{color:var(--muted);font-size:13.5px}
+
+/* 알림 */
+#toast{position:fixed;left:50%;top:calc(72px + env(safe-area-inset-top,0px));transform:translateX(-50%);z-index:90;max-width:90vw;
+  padding:9px 16px;border-radius:20px;background:rgba(27,35,41,.92);color:#fff;font-size:13.5px;opacity:0;transition:opacity .2s;pointer-events:none;text-align:center}
+#toast.show{opacity:1}
+
+/* 지도 위 표시물 (지도는 항상 밝은 배경이라 고정색) */
+.pt{position:relative;width:12px;height:12px;cursor:pointer}
+.pt .dot{position:absolute;top:0;right:0;bottom:0;left:0;border-radius:50%;background:var(--c);border:2px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.35)}
+.pt.sel .dot{top:-4px;right:-4px;bottom:-4px;left:-4px;border-width:3px}
+.pt .lbl{position:absolute;left:16px;top:50%;transform:translateY(-50%);white-space:nowrap;display:none;
+  font:500 12px/1.3 "IBM Plex Sans KR","Apple SD Gothic Neo","Malgun Gothic",sans-serif;color:#1B2329;
+  background:rgba(255,255,255,.93);border:1px solid rgba(0,0,0,.2);border-radius:3px;padding:1px 5px}
+body.labels .pt .lbl{display:block}
+.me{position:relative;width:64px;height:64px;pointer-events:none}
+.me .cone{position:absolute;top:0;left:0;width:100%;height:100%;display:none;transform-origin:50% 50%;will-change:transform}
+.me.has-heading .cone{display:block}
+.me .medot{position:absolute;left:23px;top:23px;width:18px;height:18px;border-radius:50%;background:#1F6FEB;border:3px solid #fff;
+  box-shadow:0 0 0 1px rgba(0,0,0,.25),0 1px 4px rgba(0,0,0,.3)}
+.pin{width:30px;height:40px;pointer-events:none;filter:drop-shadow(0 2px 2px rgba(0,0,0,.35))}
+@media (prefers-reduced-motion:reduce){#menu,#locBtn{transition:none}}
+</style>
+</head>
+<body>
+
+<!-- ===== 공사 목록 화면 ===== -->
+<section id="listView" class="view active" aria-label="공사 목록">
+  <div class="list-wrap">
+    <header class="list-head">
+      <h1 id="listTitle">공사 노선 지도</h1>
+      <div class="sub" id="listSub"></div>
+      <input id="search" type="search" placeholder="공사 이름 검색" autocomplete="off" hidden>
+    </header>
+    <ul class="projects" id="projects"></ul>
+    <div class="list-foot">
+      <div id="keyBox" hidden>
+        <label for="keyInput">네이버 지도 Client ID</label>
+        <input id="keyInput" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="네이버 클라우드 콘솔의 Client ID">
+        <button class="btn primary" id="keyBtn" style="width:100%;margin-top:8px">지도 준비</button>
+        <p class="hint" id="originHint"></p>
+      </div>
+      <label class="btn" id="openLocalBtn" for="fileInput">내 KML·KMZ 파일 열기</label>
+      <details class="logbox"><summary>처리 기록</summary><ul class="log" id="listLog"></ul></details>
+    </div>
+  </div>
+</section>
+
+<!-- ===== 지도 화면 ===== -->
+<section id="mapView" class="view" aria-label="지도">
+  <div id="map"></div>
+  <div id="mapLoading">지도를 불러오는 중…</div>
+  <div class="mtop">
+    <div class="pill">
+      <button class="back" id="backBtn" aria-label="공사 목록으로">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg>
+      </button>
+      <span class="name" id="mapTitle"></span>
+    </div>
+    <div class="rcol">
+      <button class="fab" id="layerBtn" aria-label="지도 설정">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 3l9 5-9 5-9-5 9-5z"/><path d="M3 13l9 5 9-5"/></svg>
+      </button>
+      <button class="fab" id="fitBtn" aria-label="노선 전체 보기">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
+      </button>
+    </div>
+  </div>
+  <button class="fab" id="locBtn" aria-label="내 위치" aria-pressed="false">
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>
+  </button>
+  <div id="card" role="dialog" aria-label="선택 정보"></div>
+</section>
+
+<!-- ===== 지도 설정 시트 ===== -->
+<div id="menuBack"></div>
+<div id="menu" role="dialog" aria-label="지도 설정">
+  <div class="grab"></div>
+  <h2>지도 종류</h2>
+  <div class="seg" id="typeSeg">
+    <button data-type="NORMAL" class="on">일반</button>
+    <button data-type="SATELLITE">위성</button>
+    <button data-type="HYBRID">위성+도로</button>
+    <button data-type="TERRAIN">지형</button>
+  </div>
+  <h2>겹쳐 보기</h2>
+  <label class="sw">지적편집도 <input type="checkbox" id="cadChk"></label>
+  <label class="sw">점 이름 표시 <input type="checkbox" id="labelChk"></label>
+  <h2>노선 파일</h2>
+  <ul id="layers"></ul>
+  <label class="btn" for="fileInput" style="margin-top:10px">내 파일 추가로 열기</label>
+  <details class="logbox" style="margin-top:14px"><summary>처리 기록</summary><ul class="log" id="menuLog"></ul></details>
+  <button class="btn" id="menuClose" style="width:100%;margin-top:14px">닫기</button>
+</div>
+
+<input id="fileInput" type="file" multiple>
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script>
+/* ==================================================================
+   설정 (이 부분만 고치면 됩니다)
+   ================================================================== */
+/* 네이버 클라우드 Maps의 Client ID. Application에서 Dynamic Map과 Reverse Geocoding을 선택해야 합니다. */
+const NAVER_KEY_ID = "3n4mm9a976";
+
+/* 첫 화면 제목 */
+const PAGE_TITLE = "공사 노선 지도";
+
+/* 공사 목록
+   id    : 주소에 붙일 영문 이름 (공유 링크 예: https://아이디.github.io/저장소/?p=road1)
+   name  : 목록과 지도 위에 보일 공사 이름
+   desc  : 목록에 작게 보일 설명 (생략 가능)
+   files : index.html 기준 KML·KMZ 파일 경로 (폴더를 쓰면 "road1/route.kml") */
+const PROJECTS = [
+  // { id: "road1", name: "○○ 우회도로", desc: "○○시 ~ ○○군", files: ["road1_route.kml", "road1_ic.kml"] },
+  // { id: "hw2",   name: "△△ 고속도로 2공구", desc: "연장 8.4 km", files: ["hw2.kmz"] },
+];
+
+/* (예전 방식) 공사 구분 없이 파일만 나열해도 '공유 노선'으로 목록에 나옵니다 */
+const SHARED_KML = [];
+
+/* ================================================================== */
+const PALETTE = ["#0A6E4F", "#1F5FAD", "#C2362B", "#7A4FB0", "#D9811E", "#0E8A9A"];
+const KOREA = { latMin: 32, latMax: 39.6, lonMin: 124, lonMax: 132.5 };
+
+let map = null, sdkPromise = null, cadastral = null;
+let layers = [], layerSeq = 0, selected = null, currentProject = null;
+let mapReady = null;
+let pinMarker = null, addrReq = 0, suppressClickUntil = 0, pressActive = false, pressHandled = false;
+let meMarker = null, meCircle = null, geoWatch = null, locMode = "off", firstFix = false, lastPos = null;
+let compassEvt = null, compassActive = false, headingTarget = null, headingShown = null, headingRAF = 0;
+let posErrCode = 0, posErrAt = 0, projectLoadOk = false;
+const parsedCache = new Map();
+const logs = [];
+
+const $ = (s) => document.querySelector(s);
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+let toastTimer = 0;
+function toast(msg, ms) {
+  const t = $("#toast");
+  t.textContent = msg;
+  t.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove("show"), ms || 2600);
+}
+function log(msg, kind) {
+  logs.push({ msg, kind });
+  for (const id of ["#listLog", "#menuLog"]) {
+    const li = document.createElement("li");
+    if (kind) li.className = kind;
+    li.textContent = msg;
+    $(id).prepend(li);
+  }
+  if (kind === "err") toast(msg, 4000);
+}
+
+/* ---------------- XML 도우미 ---------------- */
+const byTag = (el, name) => Array.from(el.getElementsByTagNameNS("*", name));
+const kids = (el) => (el ? Array.from(el.childNodes).filter((n) => n.nodeType === 1) : []);
+const child = (el, name) => kids(el).find((c) => c.localName === name) || null;
+const children = (el, name) => kids(el).filter((c) => c.localName === name);
+const txt = (el, name) => { const c = el && child(el, name); return c ? c.textContent.trim() : ""; };
+
+/* ---------------- 인코딩 판별 (UTF-8 / EUC-KR / UTF-16) ---------------- */
+function decodeXml(bytes) {
+  if (bytes[0] === 0xEF && bytes[1] === 0xBB && bytes[2] === 0xBF) return { text: new TextDecoder("utf-8").decode(bytes.subarray(3)), enc: "utf-8" };
+  if (bytes[0] === 0xFF && bytes[1] === 0xFE) return { text: new TextDecoder("utf-16le").decode(bytes), enc: "utf-16le" };
+  if (bytes[0] === 0xFE && bytes[1] === 0xFF) return { text: new TextDecoder("utf-16be").decode(bytes), enc: "utf-16be" };
+  const head = new TextDecoder("windows-1252").decode(bytes.subarray(0, 300));
+  const m = head.match(/encoding\s*=\s*["']([\w.\-]+)["']/i);
+  const declared = m ? m[1].toLowerCase() : "";
+  if (declared && declared !== "utf-8" && declared !== "utf8") {
+    try { return { text: new TextDecoder(declared).decode(bytes), enc: declared }; } catch (e) { /* 아래로 진행 */ }
+  }
+  try { return { text: new TextDecoder("utf-8", { fatal: true }).decode(bytes), enc: "utf-8" }; }
+  catch (e) { return { text: new TextDecoder("euc-kr").decode(bytes), enc: "euc-kr(추정)" }; }
+}
+
+/* ---------------- 스타일 ---------------- */
+function kmlColor(v) {
+  v = (v || "").trim().replace(/^#/, "");
+  if (!/^[0-9a-f]{8}$/i.test(v)) return null;
+  const a = parseInt(v.slice(0, 2), 16) / 255;
+  return { hex: "#" + v.slice(6, 8) + v.slice(4, 6) + v.slice(2, 4), a: Math.round(a * 100) / 100 };
+}
+function readStyle(s) {
+  const st = {};
+  const ls = child(s, "LineStyle"), ps = child(s, "PolyStyle"), is = child(s, "IconStyle");
+  if (ls) {
+    const c = kmlColor(txt(ls, "color")); if (c) st.line = c;
+    const w = parseFloat(txt(ls, "width")); if (w > 0) st.width = w;
+  }
+  if (ps) {
+    const c = kmlColor(txt(ps, "color")); if (c) st.fill = c;
+    const f = txt(ps, "fill"), o = txt(ps, "outline");
+    if (f !== "") st.noFill = (f === "0" || f.toLowerCase() === "false");
+    if (o !== "") st.noOutline = (o === "0" || o.toLowerCase() === "false");
+  }
+  if (is) {
+    const c = kmlColor(txt(is, "color"));
+    if (c && c.hex.toLowerCase() !== "#ffffff") st.icon = c;
+  }
+  return st;
+}
+
+/* ---------------- 좌표 ---------------- */
+function parseCoords(s) {
+  if (!s) return [];
+  return s.replace(/\s*,\s*/g, ",").trim().split(/\s+/)
+    .map((t) => t.split(",").map(Number))
+    .filter((a) => a.length >= 2 && isFinite(a[0]) && isFinite(a[1]))
+    .map((a) => [a[1], a[0]]); // [위도, 경도]
+}
+function ringOf(boundary) {
+  if (!boundary) return [];
+  const lr = child(boundary, "LinearRing");
+  return lr ? parseCoords(txt(lr, "coordinates")) : [];
+}
+function collectGeoms(el, out) {
+  for (const c of kids(el)) {
+    const n = c.localName;
+    if (n === "Point") {
+      const p = parseCoords(txt(c, "coordinates"));
+      if (p.length) out.push({ type: "point", coords: [p[0]] });
+    } else if (n === "LineString" || n === "LinearRing") {
+      const p = parseCoords(txt(c, "coordinates"));
+      if (p.length >= 2) out.push({ type: "line", coords: p });
+    } else if (n === "Polygon") {
+      const outer = ringOf(child(c, "outerBoundaryIs"));
+      if (outer.length >= 3) {
+        const holes = children(c, "innerBoundaryIs").map(ringOf).filter((r) => r.length >= 3);
+        out.push({ type: "polygon", rings: [outer, ...holes] });
+      }
+    } else if (n === "MultiGeometry" || n === "MultiTrack") {
+      collectGeoms(c, out);
+    } else if (n === "Track") {
+      const p = children(c, "coord")
+        .map((x) => x.textContent.trim().split(/\s+/).map(Number))
+        .filter((a) => a.length >= 2 && isFinite(a[0]) && isFinite(a[1]))
+        .map((a) => [a[1], a[0]]);
+      if (p.length >= 2) out.push({ type: "line", coords: p });
+      else if (p.length === 1) out.push({ type: "point", coords: p });
+    }
+  }
+}
+function readData(pm) {
+  const out = [];
+  const ed = child(pm, "ExtendedData");
+  if (!ed) return out;
+  for (const d of byTag(ed, "Data")) out.push([d.getAttribute("name") || txt(d, "displayName"), txt(d, "value")]);
+  for (const d of byTag(ed, "SimpleData")) out.push([d.getAttribute("name") || "", d.textContent.trim()]);
+  return out;
+}
+
+/* ---------------- KML 해석 (지도와 무관한 순수 함수) ---------------- */
+function parseKml(text) {
+  const doc = new DOMParser().parseFromString(text, "application/xml");
+  if (doc.getElementsByTagName("parsererror").length) throw new Error("XML 형식이 올바르지 않아 읽을 수 없습니다.");
+
+  const styles = {}, styleMaps = {};
+  const idOf = (el) => el.getAttribute("id") || (Array.from(el.attributes).find((a) => a.localName === "id") || {}).value || "";
+  for (const s of byTag(doc, "Style")) { const id = idOf(s); if (id) styles[id] = readStyle(s); }
+  for (const cs of byTag(doc, "CascadingStyle")) {          // 구글 어스(웹)에서 내보낸 KML: <gx:CascadingStyle kml:id="..."><Style>…
+    const id = idOf(cs), inner = child(cs, "Style");
+    if (id && inner) styles[id] = readStyle(inner);
+  }
+  for (const sm of byTag(doc, "StyleMap")) {
+    const id = idOf(sm); if (!id) continue;
+    const pairs = children(sm, "Pair");
+    const pair = pairs.find((p) => txt(p, "key") === "normal") || pairs[0];
+    if (!pair) continue;
+    const inline = child(pair, "Style");
+    if (inline) { styles["\u0001" + id] = readStyle(inline); styleMaps[id] = "\u0001" + id; }
+    else styleMaps[id] = txt(pair, "styleUrl").replace(/^.*#/, "");
+  }
+  const resolve = (url) => {
+    if (!url) return null;
+    let id = url.replace(/^.*#/, "");
+    if (styleMaps[id] !== undefined) id = styleMaps[id];
+    return styles[id] || null;
+  };
+
+  const features = [], warnings = [];
+  let invalid = 0, outside = 0;
+  const checkPt = ([la, lo]) => {
+    if (Math.abs(la) > 90 || Math.abs(lo) > 180) return false;
+    if (la < KOREA.latMin || la > KOREA.latMax || lo < KOREA.lonMin || lo > KOREA.lonMax) outside++;
+    return true;
+  };
+
+  for (const pm of byTag(doc, "Placemark")) {
+    const inlineEl = child(pm, "Style");
+    const style = Object.assign({}, resolve(txt(pm, "styleUrl")) || {}, inlineEl ? readStyle(inlineEl) : {});
+    const base = { name: txt(pm, "name"), desc: txt(pm, "description"), data: readData(pm), style };
+    const geoms = [];
+    collectGeoms(pm, geoms);
+    for (const g of geoms) {
+      const pts = g.type === "polygon" ? g.rings.flat() : g.coords;
+      if (!pts.every(checkPt)) { invalid++; continue; }
+      features.push(Object.assign({}, base, g));
+    }
+  }
+
+  if (invalid) warnings.push(`위경도 범위를 벗어난 객체 ${invalid}개를 제외했습니다. TM 등 평면좌표로 저장된 파일일 수 있습니다.`);
+  if (outside) warnings.push(`한반도 범위 밖 좌표 ${outside}개가 있습니다. 좌표 순서(경도, 위도)나 원본 좌표계를 확인하세요.`);
+  const skipped = { GroundOverlay: "이미지 오버레이", NetworkLink: "네트워크 링크", ScreenOverlay: "화면 오버레이", PhotoOverlay: "사진 오버레이", Model: "3D 모델" };
+  for (const [tag, label] of Object.entries(skipped)) {
+    const n = byTag(doc, tag).length;
+    if (n) warnings.push(`${label}(${tag}) ${n}개는 표시하지 않습니다.`);
+  }
+  return { features, warnings };
+}
+
+/* ---------------- 길이·면적 (구면 계산, 참고용) ---------------- */
+const EARTH_R = 6371008.8;
+const RAD = Math.PI / 180;
+function segLength([la1, lo1], [la2, lo2]) {
+  const dLa = (la2 - la1) * RAD, dLo = (lo2 - lo1) * RAD;
+  const a = Math.sin(dLa / 2) ** 2 + Math.cos(la1 * RAD) * Math.cos(la2 * RAD) * Math.sin(dLo / 2) ** 2;
+  return 2 * EARTH_R * Math.asin(Math.min(1, Math.sqrt(a)));
+}
+function lineLength(coords) {
+  let s = 0;
+  for (let i = 1; i < coords.length; i++) s += segLength(coords[i - 1], coords[i]);
+  return s;
+}
+function ringArea(ring) {
+  const n = ring.length;
+  if (n < 3) return 0;
+  let total = 0;
+  let prev = ring[n - 1];
+  let prevTan = Math.tan((Math.PI / 2 - prev[0] * RAD) / 2), prevLng = prev[1] * RAD;
+  for (const p of ring) {
+    const tan = Math.tan((Math.PI / 2 - p[0] * RAD) / 2), lng = p[1] * RAD;
+    const d = lng - prevLng, t = tan * prevTan;
+    total += 2 * Math.atan2(t * Math.sin(d), 1 + t * Math.cos(d));
+    prevTan = tan; prevLng = lng;
+  }
+  return Math.abs(total * EARTH_R * EARTH_R);
+}
+function polygonArea(rings) {
+  if (!rings.length) return 0;
+  return Math.max(0, ringArea(rings[0]) - rings.slice(1).reduce((s, r) => s + ringArea(r), 0));
+}
+
+/* ---------------- 해석 결과 → GeoJSON + 표시 스타일 ---------------- */
+function buildLayerData(parsed, layerId, color) {
+  const geo = { type: "FeatureCollection", features: [] };
+  const index = new Map();
+  let minLa = 90, maxLa = -90, minLo = 180, maxLo = -180;
+  const ext = ([la, lo]) => { minLa = Math.min(minLa, la); maxLa = Math.max(maxLa, la); minLo = Math.min(minLo, lo); maxLo = Math.max(maxLo, lo); };
+  const xy = ([la, lo]) => [lo, la];
+  const count = { point: 0, line: 0, polygon: 0 };
+
+  parsed.features.forEach((f, i) => {
+    const fid = `L${layerId}_${i}`;
+    const st = f.style || {};
+    let geometry, style, measure = null;
+    if (f.type === "point") {
+      f.coords.forEach(ext);
+      geometry = { type: "Point", coordinates: xy(f.coords[0]) };
+      style = { kind: "point", color: st.icon ? st.icon.hex : color };
+    } else if (f.type === "line") {
+      f.coords.forEach(ext);
+      geometry = { type: "LineString", coordinates: f.coords.map(xy) };
+      const c = st.line || { hex: color, a: 0.95 };
+      style = { kind: "line", strokeColor: c.hex, strokeOpacity: c.a || 0.95, strokeWeight: Math.round(Math.max(2, Math.min(st.width || 3, 12))) };
+      measure = { label: "길이", value: lineLength(f.coords), unit: "m" };
+    } else {
+      f.rings.forEach((r) => r.forEach(ext));
+      const rings = f.rings.map((r) => {
+        const c = r.map(xy);
+        const a = c[0], b = c[c.length - 1];
+        if (a[0] !== b[0] || a[1] !== b[1]) c.push([a[0], a[1]]);
+        return c;
+      });
+      geometry = { type: "Polygon", coordinates: rings };
+      const lc = st.line || { hex: color, a: 0.95 };
+      const fc = st.fill || { hex: lc.hex, a: 0.25 };
+      style = {
+        kind: "polygon", strokeColor: lc.hex, strokeOpacity: st.noOutline ? 0.01 : (lc.a || 0.95),
+        strokeWeight: Math.round(Math.max(2, Math.min(st.width || 2, 12))),
+        fillColor: fc.hex, fillOpacity: st.noFill ? 0.01 : Math.max(fc.a, 0.01)
+      };
+      measure = { label: "면적", value: polygonArea(f.rings), unit: "m²" };
+    }
+    count[f.type]++;
+    geo.features.push({ type: "Feature", id: fid, geometry, properties: { fid, name: f.name || "" } });
+    index.set(fid, { f, style, measure });
+  });
+  const hasBounds = geo.features.length > 0;
+  return { geo, index, count, bbox: hasBounds ? { minLa, maxLa, minLo, maxLo } : null };
+}
+
+/* ---------------- 파일 읽기 ---------------- */
+function ensureJSZip() {
+  if (window.JSZip) return Promise.resolve();
+  return new Promise((res, rej) => {
+    const s = document.createElement("script");
+    s.src = "https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js";
+    s.onload = res;
+    s.onerror = () => rej(new Error("KMZ 압축 해제 라이브러리를 불러오지 못했습니다. 인터넷 연결을 확인하세요."));
+    document.head.appendChild(s);
+  });
+}
+async function decodeKmlBytes(name, bytes) {
+  if (/\.kmz$/i.test(name)) {
+    await ensureJSZip();
+    const zip = await JSZip.loadAsync(bytes);
+    const entries = Object.values(zip.files).filter((f) => !f.dir && f.name.toLowerCase().endsWith(".kml"));
+    if (!entries.length) throw new Error("KMZ 안에 KML 파일이 없습니다.");
+    const main = entries.find((f) => /(^|\/)doc\.kml$/i.test(f.name)) || entries[0];
+    return decodeXml(await main.async("uint8array"));
+  }
+  return decodeXml(bytes);
+}
+async function readKmlFile(file) {
+  return decodeKmlBytes(file.name, new Uint8Array(await file.arrayBuffer()));
+}
+/* 공유 파일: 같은 웹 주소에 올린 KML을 받아 옴 (항상 최신본을 확인하도록 캐시 재검증) */
+async function fetchShared(name) {
+  const url = /^https?:\/\//i.test(name) ? name : name.split("/").map(encodeURIComponent).join("/");
+  const res = await fetch(url, { cache: "no-cache" });
+  if (!res.ok) throw new Error(`파일을 받지 못했습니다(HTTP ${res.status}). 파일 이름과 올린 위치를 확인하세요.`);
+  return decodeKmlBytes(name, new Uint8Array(await res.arrayBuffer()));
+}
+
+
+/* ---------------- 공사 목록 ---------------- */
+function projectList() {
+  const list = PROJECTS.filter((p) => p && Array.isArray(p.files) && p.files.length)
+    .map((p) => ({ id: String(p.id || p.name), name: String(p.name || p.id), desc: p.desc ? String(p.desc) : "", files: p.files }));
+  if (SHARED_KML.length) list.push({ id: "shared", name: "공유 노선", desc: "", files: SHARED_KML });
+  return list;
+}
+function renderProjects() {
+  const list = projectList();
+  const q = ($("#search").value || "").trim().toLowerCase();
+  const ul = $("#projects");
+  ul.innerHTML = "";
+  $("#listSub").textContent = list.length ? `공사 ${list.length}건` : "";
+  $("#search").hidden = list.length < 2;
+  if (!list.length) {
+    ul.innerHTML = '<li class="empty">등록된 공사가 없습니다.<br>index.html의 PROJECTS에 공사를 추가하세요.</li>';
+    return;
+  }
+  const shown = list.filter((p) => !q || p.name.toLowerCase().includes(q) || p.desc.toLowerCase().includes(q));
+  if (!shown.length) { ul.innerHTML = '<li class="empty">검색 결과가 없습니다.</li>'; return; }
+  shown.forEach((p) => {
+    const i = list.indexOf(p);
+    const li = document.createElement("li");
+    const b = document.createElement("button");
+    b.className = "proj";
+    b.style.setProperty("--c", PALETTE[i % PALETTE.length]);
+    b.innerHTML = `<span class="bar"></span><span class="txt"><span class="t"></span><span class="d"></span></span>
+      <svg class="chev" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 5l7 7-7 7"/></svg>`;
+    b.querySelector(".t").textContent = p.name;
+    b.querySelector(".d").textContent = p.desc || `파일 ${p.files.length}개`;
+    b.onclick = () => openProject(p.id, true);
+    li.append(b);
+    ul.append(li);
+  });
+}
+
+/* ---------------- 화면 전환 (뒤로가기 버튼과 연동) ---------------- */
+function urlWith(p) {
+  const u = new URL(location.href);
+  if (p) u.searchParams.set("p", p); else u.searchParams.delete("p");
+  return u.toString();
+}
+function setView(name) {
+  $("#listView").classList.toggle("active", name === "list");
+  $("#mapView").classList.toggle("active", name === "map");
+  if (name === "map" && map && typeof map.autoResize === "function") setTimeout(() => map.autoResize(), 0);
+}
+function showList() {
+  closeMenu();
+  closeCard();
+  if (locMode !== "off") stopTracking();
+  document.title = PAGE_TITLE;
+  setView("list");
+}
+async function openProject(id, push) {
+  const list = projectList();
+  const p = list.find((x) => x.id === id);
+  if (!p) { toast(`주소의 공사(p=${id})를 찾지 못했습니다.`); history.replaceState(null, "", urlWith(null)); showList(); return; }
+  if (push) { history.pushState({ p: id, fromList: true }, "", urlWith(id)); removeLocal(); }
+  rememberMapEntry();
+  $("#mapTitle").textContent = p.name;
+  document.title = p.name;
+  setView("map");
+  if (!(await ensureMap())) return;
+  await showProject(p);
+}
+async function openLocalFiles(files) {
+  const inMap = $("#mapView").classList.contains("active");
+  if (!inMap) {
+    history.pushState({ local: true, fromList: true }, "", urlWith(null));
+    rememberMapEntry();
+    $("#mapTitle").textContent = "내 파일";
+    document.title = "내 파일";
+    setView("map");
+  }
+  if (!(await ensureMap())) return;
+  if (!inMap) clearShared();
+  await handleFiles(files);
+}
+let mapEntry = null;   // 지도 화면의 기록 (뒤로가기로 시트만 닫을 때 되돌리기용)
+function rememberMapEntry() { mapEntry = { state: history.state, url: location.href }; }
+function route() {
+  const p = new URLSearchParams(location.search).get("p");
+  if (p) openProject(p, false);
+  else if (history.state && history.state.local && map && layers.some((l) => !l.shared)) { rememberMapEntry(); setView("map"); }
+  else showList();
+}
+function onPopState() {
+  // 휴대폰 뒤로가기: 설정 시트나 정보 카드가 열려 있으면 그것만 닫고 지도에 머묾 (네이버 지도 앱과 같은 동작)
+  const inMap = $("#mapView").classList.contains("active");
+  const sheetOpen = document.body.classList.contains("menu-open") || $("#card").classList.contains("show");
+  if (inMap && sheetOpen && mapEntry) {
+    closeMenu();
+    closeCard();
+    history.pushState(mapEntry.state, "", mapEntry.url);
+    return;
+  }
+  route();
+}
+function goBack() {
+  closeMenu();
+  closeCard();
+  if (history.state && history.state.fromList) history.back();
+  else { history.replaceState(null, "", urlWith(null)); showList(); }
+}
+
+/* ---------------- 네이버 지도 SDK ---------------- */
+window.navermap_authFailure = function () {
+  log(`네이버 지도 인증에 실패했습니다. Client ID와 Web 서비스 URL(${location.origin}) 등록을 확인하세요.`, "err");
+};
+function configuredKey() {
+  return (NAVER_KEY_ID || new URLSearchParams(location.search).get("key") || $("#keyInput").value || "").trim();
+}
+function loadSdk(key) {
+  return new Promise((res, rej) => {
+    if (window.naver && naver.maps && naver.maps.Map) { res(); return; }      // 이미 불러온 경우
+    const old = document.getElementById("naverSdk"); if (old) old.remove();
+    window.__naverReady = () => res();
+    const s = document.createElement("script");
+    s.id = "naverSdk";
+    s.src = "https://oapi.map.naver.com/openapi/v3/maps.js?ncpKeyId=" + encodeURIComponent(key) + "&submodules=geocoder&callback=__naverReady";
+    s.onerror = () => rej(new Error("지도 SDK를 불러오지 못했습니다"));
+    document.head.appendChild(s);
+    setTimeout(() => rej(new Error("지도 SDK 응답 시간 초과")), 20000);
+  });
+}
+function prepareSdk(key) {
+  sdkPromise = loadSdk(key).then(() => { $("#keyBox").hidden = true; return true; })
+    .catch((e) => { log(`${e.message}. 인터넷 연결과 Client ID를 확인하세요.`, "err"); $("#keyBox").hidden = false; sdkPromise = null; return false; });
+  return sdkPromise;
+}
+async function ensureMap() {
+  if (!sdkPromise) { const k = configuredKey(); if (k) prepareSdk(k); }       // 앞서 실패했으면 다시 시도
+  if (!sdkPromise) { toast("먼저 Client ID를 입력하세요."); goBack(); return false; }
+  if (!(await sdkPromise)) { goBack(); return false; }
+  if (!map) createMap();
+  await mapReady;                                                             // 지도 초기화(init)가 끝난 뒤에 노선을 그림
+  const ld = $("#mapLoading"); if (ld) ld.remove();
+  return true;
+}
+function createMap() {
+  map = new naver.maps.Map("map", {
+    center: new naver.maps.LatLng(36.4, 127.8),
+    zoom: 7,
+    mapTypeControl: false,
+    zoomControl: false,
+    scaleControl: true
+  });
+  mapReady = new Promise((res) => {
+    let done = false;
+    const fin = () => { if (!done) { done = true; res(); } };
+    if (typeof naver.maps.Event.once === "function") naver.maps.Event.once(map, "init", fin);
+    else naver.maps.Event.addListener(map, "init", fin);
+    setTimeout(fin, 2000);                                                    // init 신호를 놓쳐도 2초 뒤에는 진행
+  });
+  naver.maps.Event.addListener(map, "click", () => {
+    if (clickSuppressed()) return;
+    closeCard();
+  });
+  naver.maps.Event.addListener(map, "dragstart", () => { if (locMode === "follow") setLocMode("track"); });
+  naver.maps.Event.addListener(map, "rightclick", (e) => { if (e && e.coord) showAddressAt(e.coord); });   // PC: 오른쪽 클릭
+  naver.maps.Event.addListener(map, "longtap", (e) => {                                                   // 예비 경로
+    if (!pressHandled && e && e.coord) { suppressClickUntil = Date.now() + 800; showAddressAt(e.coord); }
+  });
+  setupLongPress($("#map"));
+  new ResizeObserver(() => { if (map && typeof map.autoResize === "function") map.autoResize(); }).observe($("#map"));
+}
+
+/* ---------------- 길게 누르기 → 주소 ---------------- */
+function clickSuppressed() { return pressActive || Date.now() < suppressClickUntil; }
+function setupLongPress(el) {
+  let timer = 0, sx = 0, sy = 0;
+  const cancel = () => { if (timer) { clearTimeout(timer); timer = 0; } };
+  const release = () => {                       // 손을 뗀 직후의 '탭'이 방금 연 주소 카드를 닫지 않도록 잠깐 막음
+    cancel();
+    if (pressActive) { pressActive = false; suppressClickUntil = Date.now() + 500; }
+  };
+  el.addEventListener("touchstart", (e) => {
+    cancel();
+    pressHandled = false;
+    pressActive = false;                        // 이전 누름이 비정상 종료됐어도 다음 터치에서 초기화
+    if (e.touches.length !== 1) return;
+    const r = el.getBoundingClientRect(), t = e.touches[0];
+    sx = t.clientX; sy = t.clientY;
+    const ox = sx - r.left, oy = sy - r.top;
+    timer = setTimeout(() => { timer = 0; longPressAt(ox, oy); }, 550);
+  }, { passive: true, capture: true });
+  el.addEventListener("touchmove", (e) => {
+    if (!timer) return;
+    const t = e.touches[0];
+    if (e.touches.length !== 1 || Math.hypot(t.clientX - sx, t.clientY - sy) > 10) cancel();
+  }, { passive: true, capture: true });
+  el.addEventListener("touchend", release, { passive: true, capture: true });
+  el.addEventListener("touchcancel", release, { passive: true, capture: true });
+  el.addEventListener("contextmenu", (e) => e.preventDefault(), { capture: true });
+}
+function longPressAt(ox, oy) {
+  if (!map) return;
+  const proj = map.getProjection && map.getProjection();
+  if (!proj || typeof proj.fromOffsetToCoord !== "function") return;   // 이 경우 longtap 이벤트가 대신 처리
+  const coord = proj.fromOffsetToCoord(new naver.maps.Point(ox, oy));
+  pressActive = true;
+  pressHandled = true;
+  if (navigator.vibrate) navigator.vibrate(15);
+  showAddressAt(coord);
+}
+function coordLatLng(c) {
+  const lat = typeof c.lat === "function" ? c.lat() : (c.y !== undefined ? c.y : c._lat);
+  const lng = typeof c.lng === "function" ? c.lng() : (c.x !== undefined ? c.x : c._lng);
+  return [Number(lat), Number(lng)];
+}
+/* 역지오코딩 응답 → 화면에 쓸 주소 (순수 함수) */
+function addressFromResponse(res) {
+  const v2 = (res && res.v2) || {};
+  const a = v2.address || {};
+  const road = String(a.roadAddress || "").trim();
+  const jibun = String(a.jibunAddress || "").trim();
+  let area = "";
+  const r = (v2.results || [])[0];
+  if (r && r.region) area = ["area1", "area2", "area3", "area4"].map((k) => r.region[k] && r.region[k].name).filter(Boolean).join(" ");
+  return { road, jibun, area };
+}
+const PIN_HTML = '<svg class="pin" viewBox="0 0 30 40"><path d="M15 1C7.3 1 1 7.1 1 14.7 1 25 15 39 15 39s14-14 14-24.3C29 7.1 22.7 1 15 1z" fill="#E5483F" stroke="#fff" stroke-width="2"/><circle cx="15" cy="14.5" r="5" fill="#fff"/></svg>';
+function placePin(coord) {
+  if (!pinMarker) pinMarker = new naver.maps.Marker({ map, position: coord, clickable: false, zIndex: 300, icon: { content: PIN_HTML, anchor: new naver.maps.Point(15, 39) } });
+  else { pinMarker.setPosition(coord); pinMarker.setMap(map); }
+}
+function waitFor(test, ms) {
+  return new Promise((res) => {
+    const t0 = Date.now();
+    (function tick() {
+      if (test()) res(true);
+      else if (Date.now() - t0 > ms) res(false);
+      else setTimeout(tick, 100);
+    })();
+  });
+}
+async function showAddressAt(coord) {
+  clearSelection();
+  placePin(coord);
+  const [lat, lng] = coordLatLng(coord);
+  const coordText = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+  openCard(`<div class="top"><div class="ttl">주소 확인 중…</div><button class="close" aria-label="닫기">×</button></div><div class="coord">${coordText}</div>`);
+  const req = ++addrReq;
+  // geocoder 서브 모듈은 지도보다 늦게 준비될 수 있어 최대 3초 기다림
+  const ready = await waitFor(() => naver.maps.Service && typeof naver.maps.Service.reverseGeocode === "function", 3000);
+  if (req !== addrReq) return;
+  const S = naver.maps.Service;
+  if (!ready) { renderAddress(null, coordText, "주소 검색 모듈(geocoder)을 불러오지 못했습니다."); return; }
+  S.reverseGeocode({ coords: coord, orders: "legalcode,addr,roadaddr" }, (status, res) => {
+    if (req !== addrReq) return;
+    const OK = S.Status && S.Status.OK !== undefined ? S.Status.OK : 200;
+    if (status !== OK) {
+      renderAddress(null, coordText, "주소를 가져오지 못했습니다. 네이버 클라우드 Application에서 Reverse Geocoding을 선택했는지 확인하세요.");
+      return;
+    }
+    renderAddress(addressFromResponse(res), coordText);
+  });
+}
+function renderAddress(addr, coordText, error) {
+  let main, sub = "";
+  if (error) { main = "주소를 확인할 수 없음"; sub = error; }
+  else if (addr.road) { main = addr.road; sub = addr.jibun ? `지번 ${addr.jibun}` : ""; }
+  else if (addr.jibun) { main = addr.jibun; }
+  else if (addr.area) { main = addr.area; sub = "상세 주소가 없는 지역입니다 (법정동 기준)."; }
+  else { main = "주소 정보 없음"; }
+  const copyText = error ? "" : [addr.road, addr.jibun].filter(Boolean).join(" / ") || (addr && addr.area) || "";
+  openCard(`<div class="top"><div class="ttl">${esc(main)}</div><button class="close" aria-label="닫기">×</button></div>
+    ${sub ? `<div class="meta">${esc(sub)}</div>` : ""}
+    <div class="coord">${esc(coordText)}</div>
+    <div class="actions">
+      ${copyText ? `<button class="btn" data-copy="${esc(copyText)}">주소 복사</button>` : ""}
+      <button class="btn" data-copy="${esc(coordText)}">좌표 복사</button>
+    </div>`);
+}
+async function copyText(text) {
+  let ok = false;
+  try { await navigator.clipboard.writeText(text); ok = true; }
+  catch (e) {
+    const ta = document.createElement("textarea");
+    ta.value = text; ta.setAttribute("readonly", ""); ta.style.position = "fixed"; ta.style.opacity = "0";
+    document.body.append(ta); ta.select(); ta.setSelectionRange(0, text.length);
+    try { ok = document.execCommand("copy"); } catch (_) { ok = false; }
+    ta.remove();
+  }
+  toast(ok ? "복사했습니다" : "복사하지 못했습니다. 글자를 길게 눌러 직접 복사하세요.", ok ? 0 : 4000);
+}
+
+/* ---------------- 하단 카드 ---------------- */
+function openCard(html) {
+  const c = $("#card");
+  c.innerHTML = html;
+  c.classList.add("show");
+  c.querySelectorAll(".close").forEach((b) => b.onclick = closeCard);
+  c.querySelectorAll("[data-copy]").forEach((b) => b.onclick = () => copyText(b.getAttribute("data-copy")));
+  requestAnimationFrame(() => { $("#locBtn").style.bottom = `calc(${c.offsetHeight + 16}px + env(safe-area-inset-bottom, 0px))`; });
+}
+function closeCard() {
+  clearSelection();
+  addrReq++;
+  if (pinMarker) pinMarker.setMap(null);
+  $("#card").classList.remove("show");
+  $("#locBtn").style.bottom = "";
+}
+
+/* ---------------- 노선 그리기 ---------------- */
+function pointIcon(color, name, sel) {
+  return {
+    content: `<div class="pt${sel ? " sel" : ""}" style="--c:${color}"><span class="dot"></span>${name ? `<span class="lbl">${esc(name)}</span>` : ""}</div>`,
+    anchor: new naver.maps.Point(6, 6)
+  };
+}
+function styleFor(entry) {
+  const s = entry.style;
+  if (s.kind === "point") return { icon: pointIcon(s.color, entry.f.name, false), clickable: true };
+  if (s.kind === "line") return { strokeColor: s.strokeColor, strokeOpacity: s.strokeOpacity, strokeWeight: s.strokeWeight, clickable: true };
+  return { strokeColor: s.strokeColor, strokeOpacity: s.strokeOpacity, strokeWeight: s.strokeWeight, fillColor: s.fillColor, fillOpacity: s.fillOpacity, clickable: true };
+}
+function addLayer(fileName, parsed, opts) {
+  opts = opts || {};
+  const id = ++layerSeq;
+  const color = opts.color || PALETTE[(id - 1) % PALETTE.length];
+  const built = buildLayerData(parsed, id, color);
+  const data = new naver.maps.Data();
+  const L = { id, name: fileName, color, data, visible: true, shared: !!opts.shared, count: built.count, bbox: built.bbox, index: built.index };
+  data.setStyle((feature) => {
+    const e = built.index.get(feature.getProperty("fid"));
+    return e ? styleFor(e) : {};
+  });
+  data.addGeoJson(built.geo);
+  data.setMap(map);
+  naver.maps.Event.addListener(data, "click", (ev) => {
+    if (clickSuppressed()) return;
+    const feature = ev.feature;
+    const e = feature && built.index.get(feature.getProperty("fid"));
+    if (e) select({ layer: L, feature, entry: e });
+  });
+  layers.push(L);
+  renderLayers();
+  if (opts.zoom !== false) zoomTo(L.bbox);
+  return L;
+}
+function zoomTo(b) {
+  if (!b || !map) return;
+  if (b.minLa === b.maxLa && b.minLo === b.maxLo) {
+    map.setCenter(new naver.maps.LatLng(b.minLa, b.minLo));
+    map.setZoom(17);
+    return;
+  }
+  map.fitBounds(new naver.maps.LatLngBounds(new naver.maps.LatLng(b.minLa, b.minLo), new naver.maps.LatLng(b.maxLa, b.maxLo)),
+    { top: 70, right: 30, bottom: 40, left: 30 });
+}
+function fitAll() {
+  const vis = layers.filter((l) => l.visible && l.bbox).map((l) => l.bbox);
+  if (!vis.length) { toast("표시된 노선이 없습니다."); return; }
+  zoomTo({
+    minLa: Math.min(...vis.map((b) => b.minLa)), maxLa: Math.max(...vis.map((b) => b.maxLa)),
+    minLo: Math.min(...vis.map((b) => b.minLo)), maxLo: Math.max(...vis.map((b) => b.maxLo))
+  });
+}
+function removeLocal() {
+  if (selected && !selected.layer.shared) clearSelection();
+  layers.filter((l) => !l.shared).forEach((l) => l.data.setMap(null));
+  layers = layers.filter((l) => l.shared);
+  renderLayers();
+}
+function clearShared() {
+  if (selected && selected.layer.shared) clearSelection();
+  layers.filter((l) => l.shared).forEach((l) => l.data.setMap(null));
+  layers = layers.filter((l) => !l.shared);
+  renderLayers();
+}
+async function showProject(p) {
+  if (currentProject === p.id && projectLoadOk && layers.some((l) => l.shared)) { closeCard(); return; }   // 같은 공사로 돌아오면 그대로
+  currentProject = p.id;
+  projectLoadOk = false;
+  closeCard();
+  clearShared();
+  let ok = 0, failed = 0;
+  for (const name of p.files) {
+    if (currentProject !== p.id) return;
+    try {
+      let parsed = parsedCache.get(name);
+      if (!parsed) {
+        const { text } = await fetchShared(name);
+        parsed = parseKml(text);
+        parsedCache.set(name, parsed);
+        parsed.warnings.forEach((w) => log(`${name}: ${w}`, "warn"));
+      }
+      if (currentProject !== p.id) return;
+      if (parsed.features.length) { addLayer(name.split("/").pop(), parsed, { zoom: false, shared: true }); ok++; }
+      else log(`${name}: 표시할 점·선·면이 없습니다.`, "warn");
+    } catch (e) {
+      failed++;
+      log(`${name}: ${e.message}`, "err");
+    }
+  }
+  if (currentProject !== p.id) return;
+  projectLoadOk = failed === 0;
+  if (ok) { fitAll(); log(`${p.name}: 파일 ${ok}개 표시`); }
+}
+
+/* ---------------- 선택한 노선 정보 ---------------- */
+function fmt(n, d) { return Number(n).toLocaleString("ko-KR", { maximumFractionDigits: d }); }
+function safeHtml(html) {
+  const d = new DOMParser().parseFromString("<div>" + html + "</div>", "text/html");
+  d.querySelectorAll("script,style,iframe,object,embed,link,meta,form,base").forEach((n) => n.remove());
+  d.querySelectorAll("*").forEach((n) => {
+    for (const a of Array.from(n.attributes)) {
+      const nm = a.name.toLowerCase();
+      if (nm.startsWith("on") || ((nm === "href" || nm === "src" || nm === "xlink:href") && /^\s*javascript:/i.test(a.value))) n.removeAttribute(a.name);
+    }
+  });
+  d.querySelectorAll("a[href]").forEach((a) => { a.setAttribute("target", "_blank"); a.setAttribute("rel", "noopener noreferrer"); });
+  return d.body.firstChild ? d.body.firstChild.innerHTML : "";
+}
+function clearSelection() {
+  if (!selected) return;
+  selected.layer.data.revertStyle(selected.feature);
+  selected = null;
+}
+function select(item) {
+  closeCard();
+  selected = item;
+  const { entry, layer, feature } = item;
+  const s = entry.style, f = entry.f;
+  if (s.kind === "point") layer.data.overrideStyle(feature, { icon: pointIcon(s.color, f.name, true) });
+  else layer.data.overrideStyle(feature, { strokeWeight: s.strokeWeight + 3 });
+
+  let measure = "";
+  if (s.kind === "point") measure = `<div class="coord">${f.coords[0][0].toFixed(6)}, ${f.coords[0][1].toFixed(6)}</div>`;
+  else if (entry.measure) measure = `<div class="measure">${entry.measure.label} ${fmt(entry.measure.value, 1)} ${entry.measure.unit}<small>구면 계산값(참고용, 측량값 아님)</small></div>`;
+  let table = "";
+  if (f.data && f.data.length) table = "<table>" + f.data.map(([k, v]) => `<tr><td>${esc(k)}</td><td>${esc(v)}</td></tr>`).join("") + "</table>";
+  let desc = "";
+  if (f.desc) desc = /<[a-z][\s\S]*>/i.test(f.desc) ? `<div class="desc">${safeHtml(f.desc)}</div>` : `<div class="desc plain">${esc(f.desc)}</div>`;
+  openCard(`<div class="top"><div class="ttl">${esc(f.name || "(이름 없음)")}</div><button class="close" aria-label="닫기">×</button></div>
+    <div class="meta">${esc(layer.name)} / ${{ point: "점", line: "선", polygon: "면" }[s.kind]}</div>${measure}${table}${desc}`);
+}
+
+/* ---------------- 지도 설정 시트 ---------------- */
+function openMenu() { renderLayers(); document.body.classList.add("menu-open"); }
+function closeMenu() { document.body.classList.remove("menu-open"); }
+function renderLayers() {
+  const ul = $("#layers");
+  ul.innerHTML = "";
+  if (!layers.length) { ul.innerHTML = '<li class="none">표시 중인 노선 파일이 없습니다.</li>'; return; }
+  for (const L of layers) {
+    const li = document.createElement("li");
+    li.className = "layer" + (L.visible ? "" : " off");
+    li.style.setProperty("--c", L.color);
+    const parts = [["point", "점"], ["line", "선"], ["polygon", "면"]].filter(([k]) => L.count[k]).map(([k, lab]) => `${lab} ${L.count[k]}`);
+    li.innerHTML = `<div class="info"><div class="nm"></div><div class="cnt"></div></div>`;
+    li.querySelector(".nm").textContent = L.name;
+    li.querySelector(".cnt").textContent = (L.shared ? "공유 " : "내 파일 ") + parts.join(", ");
+    const bGo = document.createElement("button"); bGo.textContent = "이동";
+    bGo.onclick = () => { zoomTo(L.bbox); closeMenu(); };
+    const bVis = document.createElement("button"); bVis.textContent = L.visible ? "숨기기" : "보이기";
+    bVis.onclick = () => {
+      L.visible = !L.visible;
+      if (!L.visible && selected && selected.layer === L) closeCard();
+      L.data.setMap(L.visible ? map : null);
+      renderLayers();
+    };
+    li.append(bGo, bVis);
+    ul.append(li);
+  }
+}
+function setMapType(type) {
+  if (!map || !naver.maps.MapTypeId[type]) return;
+  map.setMapTypeId(naver.maps.MapTypeId[type]);
+  document.querySelectorAll("#typeSeg button").forEach((b) => b.classList.toggle("on", b.dataset.type === type));
+}
+function setCadastral(on) {
+  if (!map) return;
+  if (on && !cadastral) cadastral = new naver.maps.CadastralLayer();
+  if (cadastral) cadastral.setMap(on ? map : null);
+}
+
+/* ---------------- 내 위치 + 바라보는 방향 ---------------- */
+const ME_HTML = '<div class="me" id="meIcon">' +
+  '<svg class="cone" id="meCone" viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient id="coneG" x1="0" y1="1" x2="0" y2="0">' +
+  '<stop offset="0" stop-color="#1F6FEB" stop-opacity=".55"/><stop offset="1" stop-color="#1F6FEB" stop-opacity="0"/></linearGradient></defs>' +
+  '<path d="M32 32 L17 6 A30 30 0 0 1 47 6 Z" fill="url(#coneG)"/></svg><div class="medot"></div></div>';
+function screenAngle() {
+  if (screen.orientation && typeof screen.orientation.angle === "number") return screen.orientation.angle;
+  if (typeof window.orientation === "number") return window.orientation;
+  return 0;
+}
+/* 안드로이드: 기기 자세 각도(alpha·beta·gamma) → 북쪽 기준 시계방향 각도
+   - 눕히거나 비스듬히 든 경우: 기기 위쪽이 가리키는 방향 (= 360 - alpha), 화면 회전 각도를 더함
+   - 세워 든 경우(기울기 약 70° 이상): 화면 뒤쪽이 향하는 방향 (W3C 방향 센서 표준의 계산 예시) */
+function headingFromAngles(alpha, beta, gamma, angle) {
+  const a = alpha * RAD, b = (beta || 0) * RAD, g = (gamma || 0) * RAD;
+  const cb = Math.cos(b);
+  let east, north, add = 0;
+  if (Math.abs(cb) >= 0.34) { east = -Math.sin(a) * cb; north = Math.cos(a) * cb; add = angle || 0; }
+  else {
+    east = -Math.cos(a) * Math.sin(g) - Math.sin(a) * Math.sin(b) * Math.cos(g);
+    north = -Math.sin(a) * Math.sin(g) + Math.cos(a) * Math.sin(b) * Math.cos(g);
+  }
+  if (!isFinite(east) || !isFinite(north) || (Math.abs(east) < 1e-9 && Math.abs(north) < 1e-9)) return null;
+  return (((Math.atan2(east, north) / RAD + add) % 360) + 360) % 360;
+}
+function headingFromEvent(e, angle) {
+  if (typeof e.webkitCompassHeading === "number" && !isNaN(e.webkitCompassHeading)) {          // iPhone
+    if (typeof e.webkitCompassAccuracy === "number" && e.webkitCompassAccuracy < 0) return null;   // 나침반 값이 유효하지 않음
+    return (((e.webkitCompassHeading + (angle || 0)) % 360) + 360) % 360;
+  }
+  if ((e.absolute === true || e.type === "deviceorientationabsolute") && typeof e.alpha === "number" && !isNaN(e.alpha)) {
+    return headingFromAngles(e.alpha, e.beta, e.gamma, angle);                                 // 안드로이드
+  }
+  return null;
+}
+function onOrientation(e) {
+  const h = headingFromEvent(e, screenAngle());
+  if (h === null) return;
+  if (!compassActive) { compassActive = true; log("방향 센서 연결됨"); }
+  headingTarget = h;
+  kickHeading();
+}
+function kickHeading() { if (!headingRAF) headingRAF = requestAnimationFrame(stepHeading); }
+function stepHeading() {
+  headingRAF = 0;
+  if (headingTarget === null) return;
+  if (headingShown === null) headingShown = headingTarget;
+  const diff = ((headingTarget - headingShown + 540) % 360) - 180;
+  headingShown = (headingShown + diff * 0.3 + 360) % 360;
+  const cone = document.getElementById("meCone"), icon = document.getElementById("meIcon");
+  if (cone) cone.style.transform = `rotate(${headingShown.toFixed(1)}deg)`;
+  if (icon) icon.classList.add("has-heading");
+  if (Math.abs(diff) > 0.5) kickHeading();
+}
+function startCompass() {
+  const noCompass = "방향 센서 값을 받지 못해, 걸어서 이동할 때의 진행 방향으로 표시합니다.";
+  const isTouch = ("ontouchstart" in window) || navigator.maxTouchPoints > 0;       // PC에서는 안내를 띄우지 않음
+  const attach = () => {
+    compassEvt = ("ondeviceorientationabsolute" in window) ? "deviceorientationabsolute" : "deviceorientation";
+    window.addEventListener(compassEvt, onOrientation);
+    setTimeout(() => { if (isTouch && locMode !== "off" && !compassActive) toast(noCompass, 4000); }, 4000);
+  };
+  const DOE = window.DeviceOrientationEvent;
+  if (!DOE) { if (isTouch) toast(noCompass, 4000); return; }
+  if (typeof DOE.requestPermission === "function") {
+    DOE.requestPermission().then((st) => {
+      if (st === "granted") attach();
+      else toast("방향 표시를 쓰려면 Safari의 '동작 및 방향' 접근을 허용하세요.", 4000);
+    }).catch(() => {});
+  } else attach();
+}
+function setLocMode(mode) {
+  locMode = mode;
+  const b = $("#locBtn");
+  b.classList.toggle("follow", mode === "follow");
+  b.classList.toggle("track", mode === "track");
+  b.setAttribute("aria-pressed", String(mode !== "off"));
+}
+function onPos(pos) {
+  const c = pos.coords;
+  const ll = new naver.maps.LatLng(c.latitude, c.longitude);
+  lastPos = ll;
+  if (!meMarker) meMarker = new naver.maps.Marker({ map, position: ll, clickable: false, zIndex: 200, icon: { content: ME_HTML, anchor: new naver.maps.Point(32, 32) } });
+  else meMarker.setPosition(ll);
+  if (naver.maps.Circle) {
+    if (!meCircle) meCircle = new naver.maps.Circle({ map, center: ll, radius: c.accuracy, fillColor: "#1F6FEB", fillOpacity: 0.1, strokeColor: "#1F6FEB", strokeOpacity: 0.35, strokeWeight: 1, clickable: false });
+    else { meCircle.setCenter(ll); meCircle.setRadius(c.accuracy); }
+  }
+  if (firstFix) {
+    firstFix = false;
+    map.setCenter(ll);
+    if (map.getZoom() < 16) map.setZoom(16);
+  } else if (locMode === "follow") map.panTo(ll);
+  if (!compassActive && typeof c.heading === "number" && !isNaN(c.heading) && (c.speed || 0) > 0.7) headingTarget = c.heading;
+  if (headingTarget !== null) kickHeading();      // 표시가 새로 만들어졌어도 방향을 다시 입힘
+}
+function onPosErr(err) {
+  const msg = err.code === 1 ? "위치 권한이 꺼져 있습니다. 브라우저 설정에서 이 사이트의 위치 접근을 허용하세요."
+    : err.code === 3 ? "위치를 찾는 데 시간이 걸립니다. 실내라면 창가나 야외에서 다시 시도하세요."
+    : "현재 위치를 확인할 수 없습니다.";
+  if (err.code !== posErrCode || Date.now() - posErrAt > 30000) {      // 같은 안내를 30초 안에 반복하지 않음
+    toast(msg, 4000);
+    log(`위치 오류(${err.code}): ${err.message || msg}`, "warn");
+  }
+  posErrCode = err.code; posErrAt = Date.now();
+  if (err.code === 1) stopTracking();
+}
+function onLocate() {
+  if (!map) return;
+  if (locMode === "off") {
+    if (!navigator.geolocation) { toast("이 브라우저는 위치 기능을 지원하지 않습니다."); return; }
+    startCompass();                                   // iOS 권한 요청은 버튼 누름과 같은 순간에
+    firstFix = true; posErrCode = 0; posErrAt = 0;
+    setLocMode("follow");
+    geoWatch = navigator.geolocation.watchPosition(onPos, onPosErr, { enableHighAccuracy: true, maximumAge: 2000, timeout: 20000 });
+  } else if (locMode === "track") {
+    setLocMode("follow");
+    if (lastPos) map.panTo(lastPos);
+  } else {
+    stopTracking();
+  }
+}
+function stopTracking() {
+  if (geoWatch !== null) navigator.geolocation.clearWatch(geoWatch);
+  if (compassEvt) window.removeEventListener(compassEvt, onOrientation);
+  if (meMarker) meMarker.setMap(null);
+  if (meCircle) meCircle.setMap(null);
+  meMarker = meCircle = null; geoWatch = null; compassEvt = null;
+  compassActive = false; headingTarget = headingShown = null; lastPos = null;
+  setLocMode("off");
+}
+
+/* ---------------- 내 파일 열기 ---------------- */
+async function handleFiles(fileList) {
+  for (const file of Array.from(fileList)) {
+    if (!/\.(kml|kmz)$/i.test(file.name)) { log(`${file.name}: KML 또는 KMZ 파일만 열 수 있습니다.`, "err"); continue; }
+    try {
+      const { text } = await readKmlFile(file);
+      const parsed = parseKml(text);
+      if (!parsed.features.length) log(`${file.name}: 표시할 점·선·면이 없습니다.`, "warn");
+      else { addLayer(file.name, parsed, { zoom: true }); log(`${file.name}: 표시`); }
+      parsed.warnings.forEach((w) => log(`${file.name}: ${w}`, "warn"));
+    } catch (e) {
+      log(`${file.name}: ${e.message}`, "err");
+    }
+  }
+}
+
+/* ---------------- 이벤트 연결 ---------------- */
+$("#search").addEventListener("input", renderProjects);
+$("#backBtn").onclick = goBack;
+$("#layerBtn").onclick = openMenu;
+$("#menuBack").onclick = closeMenu;
+$("#menuClose").onclick = closeMenu;
+$("#fitBtn").onclick = fitAll;
+$("#locBtn").onclick = onLocate;
+document.querySelectorAll("#typeSeg button").forEach((b) => b.onclick = () => setMapType(b.dataset.type));
+$("#cadChk").addEventListener("change", (e) => setCadastral(e.target.checked));
+$("#labelChk").addEventListener("change", (e) => document.body.classList.toggle("labels", e.target.checked));
+$("#fileInput").addEventListener("change", (e) => { const f = Array.from(e.target.files); e.target.value = ""; closeMenu(); if (f.length) openLocalFiles(f); });
+$("#keyBtn").onclick = () => { const k = $("#keyInput").value.trim(); if (k) prepareSdk(k).then((ok) => ok && toast("지도 준비 완료")); };
+window.addEventListener("popstate", onPopState);
+
+(function boot() {
+  document.title = PAGE_TITLE;
+  $("#listTitle").textContent = PAGE_TITLE;
+  $("#originHint").textContent = `네이버 클라우드 Maps의 Web 서비스 URL에 ${location.protocol === "file:" ? "이 페이지 주소(파일로 직접 열면 동작하지 않음)" : location.origin} 가 등록되어 있어야 합니다.`;
+  renderProjects();
+  const key = (NAVER_KEY_ID || new URLSearchParams(location.search).get("key") || "").trim();
+  if (key) prepareSdk(key);
+  else $("#keyBox").hidden = false;
+  if (location.protocol === "file:") log("파일을 직접 열면(file://) 지도가 뜨지 않습니다. 웹 주소(https://…)로 여세요.", "warn");
+  // 설정 점검: id가 겹치면 뒤의 공사를 열 수 없음
+  const ids = projectList().map((x) => x.id);
+  const dup = ids.filter((x, i) => ids.indexOf(x) !== i);
+  if (dup.length) log(`PROJECTS에 같은 id가 두 번 이상 있습니다: ${Array.from(new Set(dup)).join(", ")}`, "err");
+  // '내 파일' 화면은 새로고침하면 복원할 수 없으므로 목록으로
+  if (history.state && history.state.local) history.replaceState(null, "", urlWith(null));
+  const p0 = new URLSearchParams(location.search).get("p");
+  if (p0 && !ids.includes(p0)) {
+    history.replaceState(null, "", urlWith(null));                    // 없는 공사 주소 → 목록
+    toast(`주소의 공사(p=${p0})를 찾지 못했습니다.`, 4000);
+  } else if (p0 && !(history.state && history.state.fromList)) {
+    history.replaceState(null, "", urlWith(null));                    // 공유 링크로 바로 들어와도 뒤로가기 시 목록이 나오도록
+    history.pushState({ p: p0, fromList: true }, "", urlWith(p0));
+  }
+  route();
+})();
+</script>
+</body>
+</html>
