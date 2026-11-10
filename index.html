@@ -99,6 +99,9 @@ details.logbox summary{cursor:pointer;color:var(--muted);font-size:13.5px}
 #locBtn.track{color:var(--blue)}
 #locBtn.follow{background:var(--blue);color:#fff}
 #mapLoading{position:absolute;top:0;right:0;bottom:0;left:0;display:flex;align-items:center;justify-content:center;color:var(--muted);z-index:5;pointer-events:none}
+#busy{position:absolute;left:50%;transform:translateX(-50%);top:calc(68px + env(safe-area-inset-top,0px));z-index:35;max-width:86%;
+  padding:8px 14px;border-radius:18px;background:rgba(27,35,41,.88);color:#fff;font-size:13.5px;text-align:center;pointer-events:none}
+#busy[hidden]{display:none}
 
 /* 하단 정보 카드 */
 #card{position:absolute;left:calc(8px + env(safe-area-inset-left,0px));right:calc(8px + env(safe-area-inset-right,0px));
@@ -193,6 +196,7 @@ body.labels .pt .lbl{display:block}
 <section id="mapView" class="view" aria-label="지도">
   <div id="mapWrap"><div id="map"></div></div>
   <div id="mapLoading">지도를 불러오는 중…</div>
+  <div id="busy" role="status" hidden></div>
   <div class="mtop">
     <div class="pill">
       <button class="back" id="backBtn" aria-label="공사 목록으로">
@@ -244,7 +248,7 @@ body.labels .pt .lbl{display:block}
    설정 (이 부분만 고치면 됩니다)
    ================================================================== */
 /* 네이버 클라우드 Maps의 Client ID. Application에서 Dynamic Map과 Reverse Geocoding을 선택해야 합니다. */
-const NAVER_KEY_ID = "3n4mm9a976";
+const NAVER_KEY_ID = "";
 
 /* 첫 화면 제목 */
 const PAGE_TITLE = "공사 노선 지도";
@@ -433,7 +437,9 @@ function parseKml(text) {
     return true;
   };
 
-  for (const pm of byTag(doc, "Placemark")) {
+  const pmList = byTag(doc, "Placemark");
+  for (let pi = 0; pi < pmList.length; pi++) {
+    const pm = pmList[pi];
     const inlineEl = child(pm, "Style");
     const style = Object.assign({}, resolve(txt(pm, "styleUrl")) || {}, inlineEl ? readStyle(inlineEl) : {});
     const base = { name: txt(pm, "name"), desc: txt(pm, "description"), data: readData(pm), style };
@@ -442,7 +448,7 @@ function parseKml(text) {
     for (const g of geoms) {
       const pts = g.type === "polygon" ? g.rings.flat() : g.coords;
       if (!pts.every(checkPt)) { invalid++; continue; }
-      features.push(Object.assign({}, base, g));
+      features.push(Object.assign({}, base, g, { pm: pi }));
     }
   }
 
@@ -560,15 +566,32 @@ async function decodeKmlBytes(name, bytes) {
   return decodeXml(bytes);
 }
 async function readKmlFile(file) {
-  return decodeKmlBytes(file.name, new Uint8Array(await file.arrayBuffer()));
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  return bytes;
 }
-/* 공유 파일: 같은 웹 주소에 올린 KML을 받아 옴 (항상 최신본을 확인하도록 캐시 재검증) */
+/* 공유 파일: 같은 웹 주소에 올린 KML을 받아 옴 (항상 최신본을 확인하도록 캐시 재검증)
+   아이폰·맥에서 올린 한글 파일명은 자모가 분리된 형태(NFD)로 저장될 수 있어, 두 형태를 모두 시도함 */
+async function fetchSharedBytes(name) {
+  if (/^https?:\/\//i.test(name)) {
+    const r = await fetch(name, { cache: "no-cache" });
+    if (!r.ok) throw new Error(`파일을 받지 못했습니다(HTTP ${r.status}).`);
+    return new Uint8Array(await r.arrayBuffer());
+  }
+  const variants = Array.from(new Set([name, name.normalize("NFC"), name.normalize("NFD")]));
+  let status = 0;
+  for (const v of variants) {
+    const r = await fetch(v.split("/").map(encodeURIComponent).join("/"), { cache: "no-cache" });
+    if (r.ok) return new Uint8Array(await r.arrayBuffer());
+    status = r.status;
+    if (r.status !== 404) break;
+  }
+  throw new Error(`파일을 받지 못했습니다(HTTP ${status}). 파일 이름과 올린 위치를 확인하세요. 영문 파일명을 권장합니다.`);
+}
 async function fetchShared(name) {
-  const url = /^https?:\/\//i.test(name) ? name : name.split("/").map(encodeURIComponent).join("/");
-  const res = await fetch(url, { cache: "no-cache" });
-  if (!res.ok) throw new Error(`파일을 받지 못했습니다(HTTP ${res.status}). 파일 이름과 올린 위치를 확인하세요.`);
-  return decodeKmlBytes(name, new Uint8Array(await res.arrayBuffer()));
+  return decodeKmlBytes(name, await fetchSharedBytes(name));
 }
+const nextFrame = () => new Promise((r) => setTimeout(r, 40));
+const mb = (n) => (n / 1048576).toFixed(1) + " MB";
 
 
 /* ---------------- 공사 목록 ---------------- */
@@ -726,9 +749,11 @@ function createMap() {
     else naver.maps.Event.addListener(map, "init", fin);
     setTimeout(fin, 2000);                                                    // init 신호를 놓쳐도 2초 뒤에는 진행
   });
-  naver.maps.Event.addListener(map, "click", () => {
+  naver.maps.Event.addListener(map, "click", (e) => {
     if (clickSuppressed()) return;
-    closeCard();
+    const hit = e && e.coord ? hitCanvasLayers(e.coord) : null;
+    if (hit) selectCanvas(hit.layer, hit.pm);
+    else closeCard();
   });
   naver.maps.Event.addListener(map, "dragstart", () => { if (locMode === "follow") setLocMode("track"); });
   naver.maps.Event.addListener(map, "rightclick", (e) => { if (e && e.coord) showAddressAt(e.coord); });   // PC: 오른쪽 클릭
@@ -899,21 +924,38 @@ function addLayer(fileName, parsed, opts) {
   opts = opts || {};
   const id = ++layerSeq;
   const color = opts.color || PALETTE[(id - 1) % PALETTE.length];
-  const built = buildLayerData(parsed, id, color);
-  const data = new naver.maps.Data();
-  const L = { id, name: fileName, color, data, visible: true, shared: !!opts.shared, count: built.count, bbox: built.bbox, index: built.index };
-  data.setStyle((feature) => {
-    const e = built.index.get(feature.getProperty("fid"));
-    return e ? styleFor(e) : {};
-  });
-  data.addGeoJson(built.geo);
-  data.setMap(map);
-  naver.maps.Event.addListener(data, "click", (ev) => {
-    if (clickSuppressed()) return;
-    const feature = ev.feature;
-    const e = feature && built.index.get(feature.getProperty("fid"));
-    if (e) select({ layer: L, feature, entry: e });
-  });
+  const stats = layerStats(parsed.features);
+  // 선·면 조각이 많으면 네이버 오버레이 대신 캔버스 한 장에 그림 (휴대폰 과부하 방지)
+  const heavy = (stats.parts > HEAVY_PARTS || stats.verts > HEAVY_VERTS) && typeof naver.maps.OverlayView === "function";
+  const dataFeatures = heavy ? parsed.features.filter((f) => f.type === "point") : parsed.features;
+  const built = buildLayerData({ features: dataFeatures }, id, color);
+  const L = { id, name: fileName, color, data: null, canvas: null, pmInfo: null, visible: true, shared: !!opts.shared,
+    count: countByPlacemark(parsed.features), parts: stats.parts, heavy, bbox: built.bbox, index: built.index };
+  if (dataFeatures.length) {
+    const data = new naver.maps.Data();
+    L.data = data;
+    data.setStyle((feature) => {
+      const e = built.index.get(feature.getProperty("fid"));
+      return e ? styleFor(e) : {};
+    });
+    data.addGeoJson(built.geo);
+    data.setMap(map);
+    naver.maps.Event.addListener(data, "click", (ev) => {
+      if (clickSuppressed()) return;
+      const feature = ev.feature;
+      const e = feature && built.index.get(feature.getProperty("fid"));
+      if (e) select({ layer: L, feature, entry: e });
+    });
+  }
+  if (heavy) {
+    const prep = prepCanvasPaths(parsed.features, color);
+    const CL = canvasLayerClass();
+    L.canvas = new CL(prep.paths, prep.bbox);
+    L.pmInfo = prep.pmInfo;
+    L.bbox = mergeBbox(L.bbox, prep.bbox);
+    L.canvas.setMap(map);
+    log(`${fileName}: 선·면 조각 ${stats.parts.toLocaleString("ko-KR")}개 — 대용량 방식으로 표시`);
+  }
   layers.push(L);
   renderLayers();
   if (opts.zoom !== false) zoomTo(L.bbox);
@@ -937,15 +979,19 @@ function fitAll() {
     minLo: Math.min(...vis.map((b) => b.minLo)), maxLo: Math.max(...vis.map((b) => b.maxLo))
   });
 }
+function setLayerMap(l, m) {
+  if (l.data) l.data.setMap(m);
+  if (l.canvas) l.canvas.setMap(m);
+}
 function removeLocal() {
   if (selected && !selected.layer.shared) clearSelection();
-  layers.filter((l) => !l.shared).forEach((l) => l.data.setMap(null));
+  layers.filter((l) => !l.shared).forEach((l) => setLayerMap(l, null));
   layers = layers.filter((l) => l.shared);
   renderLayers();
 }
 function clearShared() {
   if (selected && selected.layer.shared) clearSelection();
-  layers.filter((l) => l.shared).forEach((l) => l.data.setMap(null));
+  layers.filter((l) => l.shared).forEach((l) => setLayerMap(l, null));
   layers = layers.filter((l) => !l.shared);
   renderLayers();
 }
@@ -955,17 +1001,26 @@ async function showProject(p) {
   projectLoadOk = false;
   closeCard();
   clearShared();
-  let ok = 0, failed = 0;
+  let ok = 0, failed = 0, n = 0;
   for (const name of p.files) {
     if (currentProject !== p.id) return;
+    n++;
+    const tag = p.files.length > 1 ? ` (${n}/${p.files.length})` : "";
     try {
       let parsed = parsedCache.get(name);
       if (!parsed) {
-        const { text } = await fetchShared(name);
+        showBusy(`노선 파일 받는 중…${tag}`);
+        const bytes = await fetchSharedBytes(name);
+        if (bytes.length > 3e6) showBusy(`큰 파일(${mb(bytes.length)}) 해석 중…${tag}`);
+        await nextFrame();
+        const { text } = await decodeKmlBytes(name, bytes);
         parsed = parseKml(text);
         parsedCache.set(name, parsed);
         parsed.warnings.forEach((w) => log(`${name}: ${w}`, "warn"));
       }
+      if (currentProject !== p.id) return;
+      showBusy(`지도에 그리는 중…${tag}`);
+      await nextFrame();
       if (currentProject !== p.id) return;
       if (parsed.features.length) { addLayer(name.split("/").pop(), parsed, { zoom: false, shared: true }); ok++; }
       else log(`${name}: 표시할 점·선·면이 없습니다.`, "warn");
@@ -974,10 +1029,220 @@ async function showProject(p) {
       log(`${name}: ${e.message}`, "err");
     }
   }
+  hideBusy();
   if (currentProject !== p.id) return;
   projectLoadOk = failed === 0;
   if (ok) { fitAll(); log(`${p.name}: 파일 ${ok}개 표시`); }
 }
+
+/* ---------------- 대용량 노선: 캔버스 한 장에 그리기 ---------------- */
+const HEAVY_PARTS = 1500, HEAVY_VERTS = 60000;
+function layerStats(features) {
+  let parts = 0, verts = 0;
+  for (const f of features) {
+    if (f.type === "line") { parts++; verts += f.coords.length; }
+    else if (f.type === "polygon") { parts++; for (const r of f.rings) verts += r.length; }
+  }
+  return { parts, verts };
+}
+function countByPlacemark(features) {
+  const s = { point: new Set(), line: new Set(), polygon: new Set() };
+  features.forEach((f, i) => s[f.type].add(f.pm === undefined ? "i" + i : f.pm));
+  return { point: s.point.size, line: s.line.size, polygon: s.polygon.size };
+}
+function mergeBbox(a, b) {
+  if (!a) return b || null;
+  if (!b) return a;
+  return { minLa: Math.min(a.minLa, b.minLa), maxLa: Math.max(a.maxLa, b.maxLa), minLo: Math.min(a.minLo, b.minLo), maxLo: Math.max(a.maxLo, b.maxLo) };
+}
+function mercY(lat) {
+  const s = Math.sin(Math.max(-85, Math.min(85, lat)) * RAD);
+  return 0.5 * Math.log((1 + s) / (1 - s));
+}
+function invMercY(y) { return Math.atan(Math.sinh(y)) / RAD; }
+/* 선·면을 그리기용 배열로 변환 (메르카토르 좌표를 미리 계산해 두어 다시 그릴 때 빠르게) */
+function prepCanvasPaths(features, color) {
+  const paths = [], pmInfo = new Map();
+  let minLa = 90, maxLa = -90, minLo = 180, maxLo = -180;
+  for (const f of features) {
+    if (f.type !== "line" && f.type !== "polygon") continue;
+    const st = f.style || {};
+    const lc = st.line || { hex: color, a: 0.95 };
+    const width = Math.max(1.5, Math.min(st.width || 2, 12));
+    const style = f.type === "line"
+      ? { stroke: lc.hex, alpha: lc.a || 0.95, width, fill: null, fillAlpha: 0 }
+      : { stroke: lc.hex, alpha: st.noOutline ? 0 : (lc.a || 0.95), width,
+          fill: (st.fill || { hex: lc.hex }).hex, fillAlpha: st.noFill ? 0 : (st.fill ? st.fill.a : 0.25) };
+    const rings = f.type === "line" ? [f.coords] : f.rings;
+    let bx0 = Infinity, bx1 = -Infinity, by0 = Infinity, by1 = -Infinity;
+    const parts = rings.map((r) => {
+      const n = r.length, mx = new Float64Array(n), my = new Float64Array(n);
+      for (let i = 0; i < n; i++) {
+        const la = r[i][0], lo = r[i][1];
+        mx[i] = lo * RAD; my[i] = mercY(la);
+        if (la < minLa) minLa = la; if (la > maxLa) maxLa = la; if (lo < minLo) minLo = lo; if (lo > maxLo) maxLo = lo;
+        if (mx[i] < bx0) bx0 = mx[i]; if (mx[i] > bx1) bx1 = mx[i]; if (my[i] < by0) by0 = my[i]; if (my[i] > by1) by1 = my[i];
+      }
+      return { mx, my };
+    });
+    paths.push({ pm: f.pm, kind: f.type, parts, style, key: `${style.stroke}|${style.alpha}|${style.width}|${style.fill}|${style.fillAlpha}`, bx0, bx1, by0, by1 });
+    let info = pmInfo.get(f.pm);
+    if (!info) { info = { f, lines: 0, polys: 0, len: 0, area: 0 }; pmInfo.set(f.pm, info); }
+    if (f.type === "line") { info.lines++; info.len += lineLength(f.coords); }
+    else { info.polys++; info.area += polygonArea(f.rings); }
+  }
+  paths.sort((a, b) => (a.kind === b.kind ? 0 : a.kind === "polygon" ? -1 : 1) || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+  return { paths, pmInfo, bbox: paths.length ? { minLa, maxLa, minLo, maxLo } : null };
+}
+/* 지도 좌표 → 화면 좌표 변환식 보정: 네이버 투영 함수로 두 점을 변환해 1차식 계수를 구하고, 세 번째 점으로 검증 */
+function calibrate(proj, b) {
+  let la0 = b.minLa, la1 = b.maxLa, lo0 = b.minLo, lo1 = b.maxLo;
+  if (la1 - la0 < 1e-4) { la0 -= 0.01; la1 += 0.01; }
+  if (lo1 - lo0 < 1e-4) { lo0 -= 0.01; lo1 += 0.01; }
+  const off = (la, lo) => proj.fromCoordToOffset(new naver.maps.LatLng(la, lo));
+  const o1 = off(la0, lo0), o2 = off(la1, lo1);
+  const ax = (o2.x - o1.x) / ((lo1 - lo0) * RAD), bx = o1.x - ax * lo0 * RAD;
+  const ay = (o2.y - o1.y) / (mercY(la1) - mercY(la0)), by = o1.y - ay * mercY(la0);
+  const la3 = la0 * 0.3 + la1 * 0.7, lo3 = lo0 * 0.6 + lo1 * 0.4, o3 = off(la3, lo3);
+  const err = Math.hypot(ax * lo3 * RAD + bx - o3.x, ay * mercY(la3) + by - o3.y);
+  return { ax, bx, ay, by, ok: isFinite(ax) && isFinite(ay) && isFinite(err) && err < 1.5 };
+}
+let CanvasLayerClass = null;
+function canvasLayerClass() {
+  if (CanvasLayerClass) return CanvasLayerClass;
+  function CL(paths, bbox) {
+    this._paths = paths; this._bbox = bbox; this._sel = -1; this._ls = []; this._cal = null;
+    this._canvas = document.createElement("canvas");
+    this._canvas.style.cssText = "position:absolute;left:0;top:0;pointer-events:none";
+  }
+  CL.prototype = new naver.maps.OverlayView();
+  CL.prototype.constructor = CL;
+  CL.prototype.onAdd = function () {
+    this.getPanes().overlayLayer.appendChild(this._canvas);
+    const m = this.getMap();
+    this._ls = [naver.maps.Event.addListener(m, "idle", () => this.draw())];   // 지도를 끌고 난 뒤 빈 곳을 다시 그림
+  };
+  CL.prototype.onRemove = function () {
+    this._canvas.remove();
+    if (naver.maps.Event.removeListener) this._ls.forEach((l) => naver.maps.Event.removeListener(l));
+    this._ls = [];
+  };
+  CL.prototype.setSelected = function (pm) { this._sel = pm; this.draw(); };
+  CL.prototype.draw = function () { drawCanvasLayer(this); };
+  CL.prototype.hit = function (coord, tolPx) { return hitCanvasLayer(this, coord, tolPx); };
+  CanvasLayerClass = CL;
+  return CL;
+}
+function projector(L) {
+  const cal = L._cal;
+  if (cal && cal.ok) return (mx, my) => [cal.ax * mx + cal.bx, cal.ay * my + cal.by];
+  const proj = L.getProjection();
+  return (mx, my) => { const o = proj.fromCoordToOffset(new naver.maps.LatLng(invMercY(my), mx / RAD)); return [o.x, o.y]; };
+}
+function drawCanvasLayer(L) {
+  const m = L.getMap(), proj = L.getProjection();
+  const el = $("#map");
+  if (!m || !proj || !L._bbox) return;
+  const W = el.clientWidth, H = el.clientHeight;
+  if (!W || !H) return;
+  const mxg = Math.round(W * 0.5), myg = Math.round(H * 0.5);           // 화면 밖 여유분(끌 때 빈 곳이 덜 보이게)
+  const cw = W + mxg * 2, ch = H + myg * 2;
+  const dpr = Math.max(1, Math.min(window.devicePixelRatio || 1, 2, Math.sqrt(12e6 / (cw * ch))));
+  const tl = typeof L.getContainerTopLeft === "function" ? L.getContainerTopLeft() : { x: 0, y: 0 };
+  const cv = L._canvas;
+  const pw = Math.round(cw * dpr), ph = Math.round(ch * dpr);
+  if (cv.width !== pw || cv.height !== ph) { cv.width = pw; cv.height = ph; cv.style.width = cw + "px"; cv.style.height = ch + "px"; }
+  const left = tl.x - mxg, top = tl.y - myg;
+  cv.style.left = left + "px"; cv.style.top = top + "px";
+  L._cal = calibrate(proj, L._bbox);
+  const P = projector(L);
+  const ctx = cv.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, cw, ch);
+  ctx.lineJoin = "round"; ctx.lineCap = "round";
+  const visible = (p) => {
+    const a = P(p.bx0, p.by0), b = P(p.bx1, p.by1);
+    const x0 = Math.min(a[0], b[0]) - left, x1 = Math.max(a[0], b[0]) - left;
+    const y0 = Math.min(a[1], b[1]) - top, y1 = Math.max(a[1], b[1]) - top;
+    return !(x1 < -20 || y1 < -20 || x0 > cw + 20 || y0 > ch + 20);
+  };
+  const trace = (p) => {
+    for (const part of p.parts) {
+      const n = part.mx.length;
+      let lx = 0, ly = 0;
+      for (let i = 0; i < n; i++) {
+        const q = P(part.mx[i], part.my[i]);
+        const x = q[0] - left, y = q[1] - top;
+        if (i === 0) { ctx.moveTo(x, y); lx = x; ly = y; }
+        else if (i === n - 1 || Math.abs(x - lx) + Math.abs(y - ly) > 0.7) { ctx.lineTo(x, y); lx = x; ly = y; }
+      }
+      if (p.kind === "polygon") ctx.closePath();
+    }
+  };
+  let i = 0;
+  const ps = L._paths;
+  while (i < ps.length) {                                 // 같은 모양끼리 묶어서 한 번에 그림
+    const key = ps[i].key, kind = ps[i].kind, st = ps[i].style;
+    ctx.beginPath();
+    let any = false;
+    for (; i < ps.length && ps[i].key === key && ps[i].kind === kind; i++) {
+      if (!visible(ps[i])) continue;
+      trace(ps[i]); any = true;
+    }
+    if (!any) continue;
+    if (kind === "polygon" && st.fill && st.fillAlpha > 0) { ctx.globalAlpha = st.fillAlpha; ctx.fillStyle = st.fill; ctx.fill("evenodd"); }
+    if (st.alpha > 0) { ctx.globalAlpha = st.alpha; ctx.strokeStyle = st.stroke; ctx.lineWidth = st.width; ctx.stroke(); }
+  }
+  if (L._sel >= 0) {                                       // 선택한 노선 강조
+    const sel = ps.filter((p) => p.pm === L._sel);
+    ctx.beginPath(); sel.forEach(trace);
+    ctx.globalAlpha = 0.85; ctx.strokeStyle = "#FFD400"; ctx.lineWidth = 9; ctx.stroke();
+    ctx.globalAlpha = 1; ctx.strokeStyle = sel.length ? sel[0].style.stroke : "#000"; ctx.lineWidth = 3; ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+}
+/* 탭한 위치에서 가장 가까운 선(또는 그 안쪽의 면)을 찾음. 화면 픽셀 기준 tolPx 이내 */
+function hitCanvasLayer(L, coord, tolPx) {
+  if (!L._paths || !L.getMap()) return null;
+  if (!L._cal) L._cal = calibrate(L.getProjection(), L._bbox);
+  const P = projector(L);
+  const [lat, lng] = coordLatLng(coord);
+  const [px, py] = P(lng * RAD, mercY(lat));
+  let best = null, bestD = tolPx;
+  for (const p of L._paths) {
+    const a = P(p.bx0, p.by0), b = P(p.bx1, p.by1);
+    if (px < Math.min(a[0], b[0]) - tolPx || px > Math.max(a[0], b[0]) + tolPx || py < Math.min(a[1], b[1]) - tolPx || py > Math.max(a[1], b[1]) + tolPx) continue;
+    let inside = false;
+    for (const part of p.parts) {
+      const n = part.mx.length;
+      let prev = P(part.mx[0], part.my[0]);
+      for (let i = 1; i < n + (p.kind === "polygon" ? 1 : 0); i++) {
+        const cur = P(part.mx[i % n], part.my[i % n]);
+        const dx = cur[0] - prev[0], dy = cur[1] - prev[1];
+        const len2 = dx * dx + dy * dy;
+        let t = len2 ? ((px - prev[0]) * dx + (py - prev[1]) * dy) / len2 : 0;
+        t = Math.max(0, Math.min(1, t));
+        const d = Math.hypot(px - (prev[0] + t * dx), py - (prev[1] + t * dy));
+        if (d < bestD) { bestD = d; best = { pm: p.pm, d }; }
+        if (p.kind === "polygon" && ((prev[1] > py) !== (cur[1] > py)) && px < prev[0] + (py - prev[1]) * dx / (dy || 1e-12)) inside = !inside;
+        prev = cur;
+      }
+    }
+    if (inside && p.style.fillAlpha > 0 && (!best || best.d > tolPx * 0.5)) { best = { pm: p.pm, d: tolPx * 0.5 }; bestD = best.d; }
+  }
+  return best;
+}
+function hitCanvasLayers(coord) {
+  let best = null;
+  for (const L of layers) {
+    if (!L.visible || !L.canvas) continue;
+    const h = L.canvas.hit(coord, 16);
+    if (h && (!best || h.d < best.d)) best = { layer: L, pm: h.pm, d: h.d };
+  }
+  return best;
+}
+function showBusy(msg) { const b = $("#busy"); b.textContent = msg; b.hidden = false; }
+function hideBusy() { $("#busy").hidden = true; }
 
 /* ---------------- 선택한 노선 정보 ---------------- */
 function fmt(n, d) { return Number(n).toLocaleString("ko-KR", { maximumFractionDigits: d }); }
@@ -995,8 +1260,32 @@ function safeHtml(html) {
 }
 function clearSelection() {
   if (!selected) return;
-  selected.layer.data.revertStyle(selected.feature);
+  if (selected.kind === "canvas") { if (selected.layer.canvas) selected.layer.canvas.setSelected(-1); }
+  else if (selected.layer.data) selected.layer.data.revertStyle(selected.feature);
   selected = null;
+}
+function detailHtml(f) {
+  let table = "";
+  if (f.data && f.data.length) table = "<table>" + f.data.map(([k, v]) => `<tr><td>${esc(k)}</td><td>${esc(v)}</td></tr>`).join("") + "</table>";
+  let desc = "";
+  if (f.desc) desc = /<[a-z][\s\S]*>/i.test(f.desc) ? `<div class="desc">${safeHtml(f.desc)}</div>` : `<div class="desc plain">${esc(f.desc)}</div>`;
+  return table + desc;
+}
+function selectCanvas(L, pm) {
+  closeCard();
+  const info = L.pmInfo && L.pmInfo.get(pm);
+  if (!info) return;
+  selected = { layer: L, kind: "canvas", pm };
+  L.canvas.setSelected(pm);
+  const f = info.f;
+  const kinds = [];
+  if (info.lines) kinds.push(`선${info.lines > 1 ? " 조각 " + info.lines.toLocaleString("ko-KR") + "개" : ""}`);
+  if (info.polys) kinds.push(`면${info.polys > 1 ? " " + info.polys + "개" : ""}`);
+  let measure = "";
+  if (info.lines) measure += `<div class="measure">길이${info.lines > 1 ? " 합계" : ""} ${fmt(info.len, 1)} m<small>${info.lines > 1 ? "모든 조각 길이를 더한 값, " : ""}구면 계산값(참고용, 측량값 아님)</small></div>`;
+  if (info.polys) measure += `<div class="measure">면적${info.polys > 1 ? " 합계" : ""} ${fmt(info.area, 1)} m²<small>구면 계산값(참고용, 측량값 아님)</small></div>`;
+  openCard(`<div class="top"><div class="ttl">${esc(f.name || "(이름 없음)")}</div><button class="close" aria-label="닫기">×</button></div>
+    <div class="meta">${esc(L.name)} / ${kinds.join(", ")}</div>${measure}${detailHtml(f)}`);
 }
 function select(item) {
   closeCard();
@@ -1031,14 +1320,15 @@ function renderLayers() {
     const parts = [["point", "점"], ["line", "선"], ["polygon", "면"]].filter(([k]) => L.count[k]).map(([k, lab]) => `${lab} ${L.count[k]}`);
     li.innerHTML = `<div class="info"><div class="nm"></div><div class="cnt"></div></div>`;
     li.querySelector(".nm").textContent = L.name;
-    li.querySelector(".cnt").textContent = (L.shared ? "공유 " : "내 파일 ") + parts.join(", ");
+    li.querySelector(".cnt").textContent = (L.shared ? "공유 " : "내 파일 ") + parts.join(", ") +
+      (L.heavy ? ` (조각 ${L.parts.toLocaleString("ko-KR")})` : "");
     const bGo = document.createElement("button"); bGo.textContent = "이동";
     bGo.onclick = () => { zoomTo(L.bbox); closeMenu(); };
     const bVis = document.createElement("button"); bVis.textContent = L.visible ? "숨기기" : "보이기";
     bVis.onclick = () => {
       L.visible = !L.visible;
       if (!L.visible && selected && selected.layer === L) closeCard();
-      L.data.setMap(L.visible ? map : null);
+      setLayerMap(L, L.visible ? map : null);
       renderLayers();
     };
     li.append(bGo, bVis);
@@ -1193,8 +1483,12 @@ async function handleFiles(fileList) {
   for (const file of Array.from(fileList)) {
     if (!/\.(kml|kmz)$/i.test(file.name)) { log(`${file.name}: KML 또는 KMZ 파일만 열 수 있습니다.`, "err"); continue; }
     try {
-      const { text } = await readKmlFile(file);
+      showBusy(file.size > 3e6 ? `큰 파일(${mb(file.size)}) 해석 중…` : "파일 읽는 중…");
+      await nextFrame();
+      const { text } = await decodeKmlBytes(file.name, await readKmlFile(file));
       const parsed = parseKml(text);
+      showBusy("지도에 그리는 중…");
+      await nextFrame();
       if (!parsed.features.length) log(`${file.name}: 표시할 점·선·면이 없습니다.`, "warn");
       else { addLayer(file.name, parsed, { zoom: true }); log(`${file.name}: 표시`); }
       parsed.warnings.forEach((w) => log(`${file.name}: ${w}`, "warn"));
@@ -1202,6 +1496,7 @@ async function handleFiles(fileList) {
       log(`${file.name}: ${e.message}`, "err");
     }
   }
+  hideBusy();
 }
 
 /* ---------------- 이벤트 연결 ---------------- */
