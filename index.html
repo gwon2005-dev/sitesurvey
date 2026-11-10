@@ -7,6 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="color-scheme" content="light dark">
+<meta name="format-detection" content="telephone=no, address=no, email=no, date=no">
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icon-192.png">
 <link rel="apple-touch-icon" href="icon-192.png">
@@ -109,7 +110,7 @@ details.logbox summary{cursor:pointer;color:var(--muted);font-size:13.5px}
   background:var(--panel);color:var(--ink);border-radius:16px;box-shadow:0 -2px 20px rgba(0,0,0,.22);padding:14px 16px 16px}
 #card.show{display:block}
 #card .top{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
-#card .ttl{font-size:17px;font-weight:600;word-break:break-all}
+#card .ttl{flex:1;min-width:0;font-size:17px;font-weight:600;word-break:keep-all;overflow-wrap:anywhere}
 #card .close{border:0;background:transparent;font-size:24px;line-height:1;padding:0 4px;color:var(--muted)}
 #card .meta{color:var(--muted);font-size:13px;margin-top:3px;word-break:break-all}
 #card .measure{margin-top:8px;font-weight:500}
@@ -155,9 +156,13 @@ body.menu-open #menuBack{display:block}
 .pt{position:relative;width:12px;height:12px;cursor:pointer}
 .pt .dot{position:absolute;top:0;right:0;bottom:0;left:0;border-radius:50%;background:var(--c);border:2px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.35)}
 .pt.sel .dot{top:-4px;right:-4px;bottom:-4px;left:-4px;border-width:3px}
-.pt .lbl{position:absolute;left:16px;top:50%;transform:translateY(-50%);white-space:nowrap;display:none;
-  font:500 12px/1.3 "IBM Plex Sans KR","Apple SD Gothic Neo","Malgun Gothic",sans-serif;color:#1B2329;
-  background:rgba(255,255,255,.93);border:1px solid rgba(0,0,0,.2);border-radius:3px;padding:1px 5px}
+.pt .lbl{position:absolute;left:17px;top:50%;transform:translateY(-50%);display:none;width:max-content;max-width:190px;
+  font:600 12.5px/1.3 "IBM Plex Sans KR","Apple SD Gothic Neo","Malgun Gothic",sans-serif;color:#1B2329;
+  background:rgba(255,255,255,.95);border:1px solid rgba(0,0,0,.22);border-radius:6px;padding:3px 7px;
+  box-shadow:0 1px 3px rgba(0,0,0,.25);pointer-events:none}
+.pt .lbl .nm{display:block;white-space:nowrap}
+.pt .lbl .memo{display:block;margin-top:1px;font-weight:400;font-size:11.5px;color:#46525B;white-space:normal;word-break:keep-all;overflow-wrap:anywhere}
+.pt.sel .lbl{border-color:#0A6E4F;box-shadow:0 0 0 2px rgba(10,110,79,.35)}
 body.labels .pt .lbl{display:block}
 .me{position:relative;width:64px;height:64px;pointer-events:none}
 .me .cone{position:absolute;top:0;left:0;width:100%;height:100%;display:none;transform-origin:50% 50%;will-change:transform}
@@ -225,14 +230,14 @@ body.labels .pt .lbl{display:block}
   <div class="grab"></div>
   <h2>지도 종류</h2>
   <div class="seg" id="typeSeg">
-    <button data-type="NORMAL" class="on">일반</button>
-    <button data-type="SATELLITE">위성</button>
+    <button data-type="NORMAL">일반</button>
+    <button data-type="SATELLITE" class="on">위성</button>
     <button data-type="HYBRID">위성+도로</button>
     <button data-type="TERRAIN">지형</button>
   </div>
   <h2>겹쳐 보기</h2>
   <label class="sw">지적편집도 <input type="checkbox" id="cadChk"></label>
-  <label class="sw">점 이름 표시 <input type="checkbox" id="labelChk"></label>
+  <label class="sw">점 이름·메모 표시 <input type="checkbox" id="labelChk" checked></label>
   <h2>노선 파일</h2>
   <ul id="layers"></ul>
   <label class="btn" for="fileInput" style="margin-top:10px">내 파일 추가로 열기</label>
@@ -248,7 +253,7 @@ body.labels .pt .lbl{display:block}
    설정 (이 부분만 고치면 됩니다)
    ================================================================== */
 /* 네이버 클라우드 Maps의 Client ID. Application에서 Dynamic Map과 Reverse Geocoding을 선택해야 합니다. */
-const NAVER_KEY_ID = "3n4mm9a976";
+const NAVER_KEY_ID = "";
 
 /* 첫 화면 제목 */
 const PAGE_TITLE = "공사 노선 지도";
@@ -268,6 +273,13 @@ const PROJECTS = [
 const SHARED_KML = [];
 
 /* ================================================================== */
+/* 처음 지도 종류: "SATELLITE"(위성), "HYBRID"(위성+도로), "NORMAL"(일반), "TERRAIN"(지형) */
+const DEFAULT_MAP_TYPE = "SATELLITE";
+/* 점 이름·메모 말풍선을 보여 줄 최소 확대 단계 (이보다 넓게 보면 겹치지 않도록 숨김) */
+const LABEL_MIN_ZOOM = 14;
+/* 말풍선 메모 최대 글자 수 */
+const MEMO_MAX = 40;
+
 const PALETTE = ["#0A6E4F", "#1F5FAD", "#C2362B", "#7A4FB0", "#D9811E", "#0E8A9A"];
 const KOREA = { latMin: 32, latMax: 39.6, lonMin: 124, lonMax: 132.5 };
 
@@ -739,10 +751,13 @@ function createMap() {
   map = new naver.maps.Map("map", {
     center: new naver.maps.LatLng(36.4, 127.8),
     zoom: 7,
+    mapTypeId: (naver.maps.MapTypeId && naver.maps.MapTypeId[DEFAULT_MAP_TYPE]) || undefined,
     mapTypeControl: false,
     zoomControl: false,
     scaleControl: true
   });
+  naver.maps.Event.addListener(map, "zoom_changed", updateLabels);
+  document.querySelectorAll("#typeSeg button").forEach((b) => b.classList.toggle("on", b.dataset.type === DEFAULT_MAP_TYPE));
   mapReady = new Promise((res) => {
     let done = false;
     const fin = () => { if (!done) { done = true; res(); } };
@@ -822,11 +837,32 @@ function coordLatLng(c) {
 function addressFromResponse(res) {
   const v2 = (res && res.v2) || {};
   const a = v2.address || {};
-  const road = String(a.roadAddress || "").trim();
-  const jibun = String(a.jibunAddress || "").trim();
-  let area = "";
-  const r = (v2.results || [])[0];
-  if (r && r.region) area = ["area1", "area2", "area3", "area4"].map((k) => r.region[k] && r.region[k].name).filter(Boolean).join(" ");
+  const results = Array.isArray(v2.results) ? v2.results : [];
+  const areas = (r) => (r && r.region) ? ["area1", "area2", "area3", "area4"].map((k) => r.region[k] && r.region[k].name).filter(Boolean) : [];
+  // 지번: 시도 시군구 읍면동 리 + (산)본번-부번
+  let jibun = "";
+  const ad = results.find((r) => r && r.name === "addr");
+  if (ad) {
+    const L = ad.land || {};
+    const num = L.number1 ? (String(L.type) === "2" ? "산" : "") + L.number1 + (L.number2 ? "-" + L.number2 : "") : "";
+    jibun = areas(ad).concat(num ? [num] : []).join(" ");
+  }
+  // 도로명: 시도 시군구 (읍·면) 도로명 건물번호 (건물명)
+  let road = "";
+  const rd = results.find((r) => r && r.name === "roadaddr");
+  if (rd && rd.land && rd.land.name) {
+    const parts = areas(rd).slice(0, 3);
+    if (parts.length === 3 && !/[읍면]$/.test(parts[2])) parts.pop();
+    parts.push(rd.land.name);
+    if (rd.land.number1) parts.push(rd.land.number1 + (rd.land.number2 ? "-" + rd.land.number2 : ""));
+    road = parts.join(" ");
+    const bld = rd.land.addition0 && rd.land.addition0.value;
+    if (bld) road += ` (${bld})`;
+  }
+  const pick = (built, given) => { given = String(given || "").trim(); return given.length >= built.length ? given : built; };
+  jibun = pick(jibun, a.jibunAddress);
+  road = pick(road, a.roadAddress);
+  const area = areas(results[0]).join(" ");
   return { road, jibun, area };
 }
 const PIN_HTML = '<svg class="pin" viewBox="0 0 30 40"><path d="M15 1C7.3 1 1 7.1 1 14.7 1 25 15 39 15 39s14-14 14-24.3C29 7.1 22.7 1 15 1z" fill="#E5483F" stroke="#fff" stroke-width="2"/><circle cx="15" cy="14.5" r="5" fill="#fff"/></svg>';
@@ -913,15 +949,34 @@ function closeCard() {
 }
 
 /* ---------------- 노선 그리기 ---------------- */
-function pointIcon(color, name, sel) {
+/* 점의 메모: KML 설명(description)을 글자만 뽑아 짧게 */
+function memoText(desc) {
+  if (!desc) return "";
+  let t = desc;
+  if (/<[a-z][\s\S]*>/i.test(t)) {
+    t = t.replace(/<br\s*\/?>/gi, " ").replace(/<\/(p|div|li|tr|td|h\d)>/gi, " ");
+    t = new DOMParser().parseFromString("<div>" + t + "</div>", "text/html").body.textContent || "";
+  }
+  t = t.replace(/\s+/g, " ").trim();
+  return t.length > MEMO_MAX ? t.slice(0, MEMO_MAX) + "…" : t;
+}
+function pointIcon(color, name, sel, memo) {
+  const lbl = (name || memo)
+    ? `<span class="lbl">${name ? `<span class="nm">${esc(name)}</span>` : ""}${memo ? `<span class="memo">${esc(memo)}</span>` : ""}</span>` : "";
   return {
-    content: `<div class="pt${sel ? " sel" : ""}" style="--c:${color}"><span class="dot"></span>${name ? `<span class="lbl">${esc(name)}</span>` : ""}</div>`,
+    content: `<div class="pt${sel ? " sel" : ""}" style="--c:${color}"><span class="dot"></span>${lbl}</div>`,
     anchor: new naver.maps.Point(6, 6)
   };
 }
+/* 말풍선은 설정이 켜져 있고, 너무 넓게 보는 단계(노선 전체 보기 등)가 아닐 때만 표시 */
+let labelsOn = true;
+function updateLabels() {
+  const zoomOk = !map || typeof map.getZoom !== "function" || map.getZoom() >= LABEL_MIN_ZOOM;
+  document.body.classList.toggle("labels", labelsOn && zoomOk);
+}
 function styleFor(entry) {
   const s = entry.style;
-  if (s.kind === "point") return { icon: pointIcon(s.color, entry.f.name, false), clickable: true };
+  if (s.kind === "point") return { icon: pointIcon(s.color, entry.f.name, false, memoText(entry.f.desc)), clickable: true };
   if (s.kind === "line") return { strokeColor: s.strokeColor, strokeOpacity: s.strokeOpacity, strokeWeight: s.strokeWeight, clickable: true };
   return { strokeColor: s.strokeColor, strokeOpacity: s.strokeOpacity, strokeWeight: s.strokeWeight, fillColor: s.fillColor, fillOpacity: s.fillOpacity, clickable: true };
 }
@@ -1342,7 +1397,7 @@ function select(item) {
   selected = item;
   const { entry, layer, feature } = item;
   const s = entry.style, f = entry.f;
-  if (s.kind === "point") layer.data.overrideStyle(feature, { icon: pointIcon(s.color, f.name, true) });
+  if (s.kind === "point") layer.data.overrideStyle(feature, { icon: pointIcon(s.color, f.name, true, memoText(f.desc)) });
   else layer.data.overrideStyle(feature, { strokeWeight: s.strokeWeight + 3 });
 
   let measure = "";
@@ -1559,12 +1614,14 @@ $("#fitBtn").onclick = fitAll;
 $("#locBtn").onclick = onLocate;
 document.querySelectorAll("#typeSeg button").forEach((b) => b.onclick = () => setMapType(b.dataset.type));
 $("#cadChk").addEventListener("change", (e) => setCadastral(e.target.checked));
-$("#labelChk").addEventListener("change", (e) => document.body.classList.toggle("labels", e.target.checked));
+$("#labelChk").addEventListener("change", (e) => { labelsOn = e.target.checked; updateLabels(); });
 $("#fileInput").addEventListener("change", (e) => { const f = Array.from(e.target.files); e.target.value = ""; closeMenu(); if (f.length) openLocalFiles(f); });
 $("#keyBtn").onclick = () => { const k = $("#keyInput").value.trim(); if (k) prepareSdk(k).then((ok) => ok && toast("지도 준비 완료")); };
 window.addEventListener("popstate", onPopState);
 
 (function boot() {
+  labelsOn = $("#labelChk").checked;
+  updateLabels();
   document.title = PAGE_TITLE;
   $("#listTitle").textContent = PAGE_TITLE;
   $("#originHint").textContent = `네이버 클라우드 Maps의 Web 서비스 URL에 ${location.protocol === "file:" ? "이 페이지 주소(파일로 직접 열면 동작하지 않음)" : location.origin} 가 등록되어 있어야 합니다.`;
