@@ -248,7 +248,7 @@ body.labels .pt .lbl{display:block}
    설정 (이 부분만 고치면 됩니다)
    ================================================================== */
 /* 네이버 클라우드 Maps의 Client ID. Application에서 Dynamic Map과 Reverse Geocoding을 선택해야 합니다. */
-const NAVER_KEY_ID = "3n4mm9a976";
+const NAVER_KEY_ID = "";
 
 /* 첫 화면 제목 */
 const PAGE_TITLE = "공사 노선 지도";
@@ -259,8 +259,9 @@ const PAGE_TITLE = "공사 노선 지도";
    desc  : 목록에 작게 보일 설명 (생략 가능)
    files : index.html 기준 KML·KMZ 파일 경로 (폴더를 쓰면 "road1/route.kml") */
 const PROJECTS = [
-  // { id: "road1", name: "○○ 우회도로", desc: "○○시 ~ ○○군", files: ["road1_route.kml", "road1_ic.kml"] },
-  // { id: "hw2",   name: "△△ 고속도로 2공구", desc: "연장 8.4 km", files: ["hw2.kmz"] },
+  { id: "sg1", name: "성거~목천 1공구", files: ["sg_mc_1.kmz"] },
+  { id: "sg2", name: "성거~목천 2공구", files: ["sg_mc_2.kmz"] },
+  // 공사를 더 넣을 때는 위 줄을 복사해서 id, name, files만 바꿉니다.
 ];
 
 /* (예전 방식) 공사 구분 없이 파일만 나열해도 '공유 노선'으로 목록에 나옵니다 */
@@ -802,7 +803,11 @@ function longPressAt(ox, oy) {
   if (!map) return;
   const proj = map.getProjection && map.getProjection();
   if (!proj || typeof proj.fromOffsetToCoord !== "function") return;   // 이 경우 longtap 이벤트가 대신 처리
-  const coord = proj.fromOffsetToCoord(new naver.maps.Point(ox, oy));
+  // 투영 함수의 기준이 지도 상자가 아닐 수 있어(지도를 끈 뒤), 지도 중심으로 차이를 보정한 뒤 변환
+  const el = $("#map");
+  const c = typeof map.getCenter === "function" ? proj.fromCoordToOffset(map.getCenter()) : null;
+  const fx = c ? el.clientWidth / 2 - c.x : 0, fy = c ? el.clientHeight / 2 - c.y : 0;
+  const coord = proj.fromOffsetToCoord(new naver.maps.Point(ox - fx, oy - fy));
   pressActive = true;
   pressHandled = true;
   if (navigator.vibrate) navigator.vibrate(15);
@@ -1111,7 +1116,8 @@ let CanvasLayerClass = null;
 function canvasLayerClass() {
   if (CanvasLayerClass) return CanvasLayerClass;
   function CL(paths, bbox) {
-    this._paths = paths; this._bbox = bbox; this._sel = -1; this._ls = []; this._cal = null;
+    this._paths = paths; this._bbox = bbox; this._sel = -1; this._ls = []; this._raf = 0; this._st = null;
+    this._ref = bbox ? { la: (bbox.minLa + bbox.maxLa) / 2, lo: (bbox.minLo + bbox.maxLo) / 2 } : null;
     this._canvas = document.createElement("canvas");
     this._canvas.style.cssText = "position:absolute;left:0;top:0;pointer-events:none";
   }
@@ -1120,12 +1126,25 @@ function canvasLayerClass() {
   CL.prototype.onAdd = function () {
     this.getPanes().overlayLayer.appendChild(this._canvas);
     const m = this.getMap();
-    this._ls = [naver.maps.Event.addListener(m, "idle", () => this.draw())];   // 지도를 끌고 난 뒤 빈 곳을 다시 그림
+    // 지도를 끄는 중·끈 뒤·확대/축소 때 모두 확인해서, 화면이 그림 범위를 벗어나거나 어긋나면 다시 그림
+    this._ls = ["bounds_changed", "center_changed", "drag", "dragend", "idle", "resize"]
+      .map((ev) => naver.maps.Event.addListener(m, ev, () => this._schedule(false)));
+    this._ls.push(naver.maps.Event.addListener(m, "zoom_changed", () => this._schedule(true)));
   };
   CL.prototype.onRemove = function () {
     this._canvas.remove();
+    if (this._raf) { cancelAnimationFrame(this._raf); this._raf = 0; }
     if (naver.maps.Event.removeListener) this._ls.forEach((l) => naver.maps.Event.removeListener(l));
     this._ls = [];
+  };
+  CL.prototype._schedule = function (force) {
+    this._force = this._force || force;
+    if (this._raf) return;
+    this._raf = requestAnimationFrame(() => {
+      this._raf = 0;
+      const f = this._force; this._force = false;
+      if (f || canvasStale(this)) this.draw();
+    });
   };
   CL.prototype.setSelected = function (pm) { this._sel = pm; this.draw(); };
   CL.prototype.draw = function () { drawCanvasLayer(this); };
@@ -1133,37 +1152,67 @@ function canvasLayerClass() {
   CanvasLayerClass = CL;
   return CL;
 }
-function projector(L) {
-  const cal = L._cal;
-  if (cal && cal.ok) return (mx, my) => [cal.ax * mx + cal.bx, cal.ay * my + cal.by];
-  const proj = L.getProjection();
-  return (mx, my) => { const o = proj.fromCoordToOffset(new naver.maps.LatLng(invMercY(my), mx / RAD)); return [o.x, o.y]; };
+/* 화면(지도 상자) 기준 좌표계 구하기
+   - 네이버 투영 함수가 어떤 기준(지도 상자/내부 창)으로 값을 주든, 지도 중심은 항상 지도 상자 한가운데에 보이므로
+     중심점으로 차이(fx, fy)를 구해 화면 좌표로 맞춤 */
+function screenFrame(L) {
+  const proj = L.getProjection(), m = L.getMap(), el = $("#map");
+  const W = el.clientWidth, H = el.clientHeight;
+  const cal = calibrate(proj, L._bbox);
+  const c = typeof m.getCenter === "function" ? proj.fromCoordToOffset(m.getCenter()) : null;
+  return { cal, proj, fx: c ? W / 2 - c.x : 0, fy: c ? H / 2 - c.y : 0, W, H, zoom: m.getZoom() };
+}
+function projector(L, fr) {
+  fr = fr || L._fr;
+  const cal = fr.cal, fx = fr.fx, fy = fr.fy;
+  if (cal && cal.ok) return (mx, my) => [cal.ax * mx + cal.bx + fx, cal.ay * my + cal.by + fy];
+  const proj = fr.proj;
+  return (mx, my) => { const o = proj.fromCoordToOffset(new naver.maps.LatLng(invMercY(my), mx / RAD)); return [o.x + fx, o.y + fy]; };
+}
+/* 지금 화면이 마지막으로 그린 그림과 어긋났거나, 그림 범위 끝에 가까워졌는지 확인 (가벼운 계산) */
+function canvasStale(L) {
+  const st = L._st, cv = L._canvas;
+  if (!st || !cv.parentNode || !L.getMap()) return true;
+  const el = $("#map");
+  if (el.clientWidth !== st.W || el.clientHeight !== st.H) return true;
+  if (L.getMap().getZoom() !== st.zoom) return true;
+  const mr = el.getBoundingClientRect(), cr = cv.getBoundingClientRect();
+  if (!cr.width) return true;
+  // 1) 그림 범위: 화면 가장자리 바깥으로 15% 이상 여유가 남아 있어야 함
+  const gx = mr.width * 0.15, gy = mr.height * 0.15;
+  if (cr.left > mr.left - gx || cr.top > mr.top - gy || cr.right < mr.right + gx || cr.bottom < mr.bottom + gy) return true;
+  // 2) 위치: 기준점이 그려진 자리와 실제 지도 위 자리가 1픽셀 넘게 다르면 다시 그림
+  const fr = screenFrame(L), P = projector(L, fr);
+  const now = P(L._ref.lo * RAD, mercY(L._ref.la));
+  const drawnX = cr.left + st.refX * (cr.width / st.cw), drawnY = cr.top + st.refY * (cr.height / st.ch);
+  return Math.abs(drawnX - (mr.left + now[0])) > 1 || Math.abs(drawnY - (mr.top + now[1])) > 1;
 }
 function drawCanvasLayer(L) {
-  const m = L.getMap(), proj = L.getProjection();
+  const m = L.getMap(), proj = L.getProjection(), cv = L._canvas, pane = cv.parentNode;
   const el = $("#map");
-  if (!m || !proj || !L._bbox) return;
+  if (!m || !proj || !L._bbox || !pane) return;
   const W = el.clientWidth, H = el.clientHeight;
   if (!W || !H) return;
   const mxg = Math.round(W * 0.5), myg = Math.round(H * 0.5);           // 화면 밖 여유분(끌 때 빈 곳이 덜 보이게)
   const cw = W + mxg * 2, ch = H + myg * 2;
   const dpr = Math.max(1, Math.min(window.devicePixelRatio || 1, 2, Math.sqrt(12e6 / (cw * ch))));
-  const tl = typeof L.getContainerTopLeft === "function" ? L.getContainerTopLeft() : { x: 0, y: 0 };
-  const cv = L._canvas;
   const pw = Math.round(cw * dpr), ph = Math.round(ch * dpr);
   if (cv.width !== pw || cv.height !== ph) { cv.width = pw; cv.height = ph; cv.style.width = cw + "px"; cv.style.height = ch + "px"; }
-  const left = tl.x - mxg, top = tl.y - myg;
-  cv.style.left = left + "px"; cv.style.top = top + "px";
-  L._cal = calibrate(proj, L._bbox);
-  const P = projector(L);
+  // 캔버스를 지금 화면 위치에 맞춰 놓음: 지도 상자와 창(pane)의 실제 화면 위치 차이를 직접 잼
+  const mr = el.getBoundingClientRect(), pr = pane.getBoundingClientRect();
+  cv.style.left = (mr.left - pr.left - mxg) + "px";
+  cv.style.top = (mr.top - pr.top - myg) + "px";
+  const fr = screenFrame(L);
+  L._fr = fr;
+  const P0 = projector(L, fr);
+  const P = (mx, my) => { const q = P0(mx, my); return [q[0] + mxg, q[1] + myg]; };   // 화면 좌표 → 캔버스 좌표
   const ctx = cv.getContext("2d");
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, cw, ch);
   ctx.lineJoin = "round"; ctx.lineCap = "round";
   const visible = (p) => {
     const a = P(p.bx0, p.by0), b = P(p.bx1, p.by1);
-    const x0 = Math.min(a[0], b[0]) - left, x1 = Math.max(a[0], b[0]) - left;
-    const y0 = Math.min(a[1], b[1]) - top, y1 = Math.max(a[1], b[1]) - top;
+    const x0 = Math.min(a[0], b[0]), x1 = Math.max(a[0], b[0]), y0 = Math.min(a[1], b[1]), y1 = Math.max(a[1], b[1]);
     return !(x1 < -20 || y1 < -20 || x0 > cw + 20 || y0 > ch + 20);
   };
   const trace = (p) => {
@@ -1172,7 +1221,7 @@ function drawCanvasLayer(L) {
       let lx = 0, ly = 0;
       for (let i = 0; i < n; i++) {
         const q = P(part.mx[i], part.my[i]);
-        const x = q[0] - left, y = q[1] - top;
+        const x = q[0], y = q[1];
         if (i === 0) { ctx.moveTo(x, y); lx = x; ly = y; }
         else if (i === n - 1 || Math.abs(x - lx) + Math.abs(y - ly) > 0.7) { ctx.lineTo(x, y); lx = x; ly = y; }
       }
@@ -1200,12 +1249,13 @@ function drawCanvasLayer(L) {
     ctx.globalAlpha = 1; ctx.strokeStyle = sel.length ? sel[0].style.stroke : "#000"; ctx.lineWidth = 3; ctx.stroke();
   }
   ctx.globalAlpha = 1;
+  const ref = P(L._ref.lo * RAD, mercY(L._ref.la));
+  L._st = { W, H, cw, ch, zoom: fr.zoom, refX: ref[0], refY: ref[1] };
 }
 /* 탭한 위치에서 가장 가까운 선(또는 그 안쪽의 면)을 찾음. 화면 픽셀 기준 tolPx 이내 */
 function hitCanvasLayer(L, coord, tolPx) {
-  if (!L._paths || !L.getMap()) return null;
-  if (!L._cal) L._cal = calibrate(L.getProjection(), L._bbox);
-  const P = projector(L);
+  if (!L._paths || !L.getMap() || !L.getProjection()) return null;
+  const P = projector(L, screenFrame(L));
   const [lat, lng] = coordLatLng(coord);
   const [px, py] = P(lng * RAD, mercY(lat));
   let best = null, bestD = tolPx;
