@@ -98,7 +98,7 @@ details.logbox summary{cursor:pointer;color:var(--muted);font-size:13.5px}
 .fab:active{filter:brightness(.94)}
 #locBtn{position:absolute;right:calc(12px + env(safe-area-inset-right,0px));bottom:calc(30px + env(safe-area-inset-bottom,0px));z-index:30;transition:bottom .18s}
 #locBtn.track{color:var(--blue)}
-#lblBtn.on{background:var(--accent);color:var(--accent-ink)}
+#lblBtn.on,#routeBtn.on{background:var(--accent);color:var(--accent-ink)}
 #locBtn.follow{background:var(--blue);color:#fff}
 #mapLoading{position:absolute;top:0;right:0;bottom:0;left:0;display:flex;align-items:center;justify-content:center;color:var(--muted);z-index:5;pointer-events:none}
 #busy{position:absolute;left:50%;transform:translateX(-50%);top:calc(68px + env(safe-area-inset-top,0px));z-index:35;max-width:86%;
@@ -165,11 +165,14 @@ body.menu-open #menuBack{display:block}
 .pt .lbl .memo{display:block;margin-top:1px;font-weight:400;font-size:9.2px;color:#46525B;white-space:normal;word-break:keep-all;overflow-wrap:anywhere}
 .pt.sel .lbl{border-color:#0A6E4F;box-shadow:0 0 0 2px rgba(10,110,79,.35)}
 body.labels .pt .lbl{display:block}
-.me{position:relative;width:64px;height:64px;pointer-events:none}
-.me .cone{position:absolute;top:0;left:0;width:100%;height:100%;display:none;transform-origin:50% 50%;will-change:transform}
-.me.has-heading .cone{display:block}
-.me .medot{position:absolute;left:23px;top:23px;width:18px;height:18px;border-radius:50%;background:#1F6FEB;border:3px solid #fff;
-  box-shadow:0 0 0 1px rgba(0,0,0,.25),0 1px 4px rgba(0,0,0,.3)}
+/* 내 위치: 네이버 지도 앱처럼 파란 점 + 은은한 원 + 바라보는 쪽으로 도는 작은 삼각형 */
+.me{position:relative;width:72px;height:72px;pointer-events:none}
+.me .halo{position:absolute;left:8px;top:8px;width:56px;height:56px;border-radius:50%;
+  background:radial-gradient(circle,rgba(31,111,235,.32) 0%,rgba(31,111,235,.18) 45%,rgba(31,111,235,0) 72%)}
+.me .dir{position:absolute;top:0;left:0;width:100%;height:100%;display:none;transform-origin:50% 50%;will-change:transform}
+.me.has-heading .dir{display:block}
+.me .medot{position:absolute;left:27px;top:27px;width:18px;height:18px;border-radius:50%;background:#1F6FEB;border:3px solid #fff;
+  box-shadow:0 0 0 1px rgba(0,0,0,.18),0 1px 4px rgba(0,0,0,.35)}
 .pin{width:30px;height:40px;pointer-events:none;filter:drop-shadow(0 2px 2px rgba(0,0,0,.35))}
 @media (prefers-reduced-motion:reduce){#menu,#locBtn{transition:none}}
 </style>
@@ -214,6 +217,9 @@ body.labels .pt .lbl{display:block}
       <button class="fab" id="layerBtn" aria-label="지도 설정">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 3l9 5-9 5-9-5 9-5z"/><path d="M3 13l9 5 9-5"/></svg>
       </button>
+      <button class="fab on" id="routeBtn" aria-label="노선도 끄기·켜기" aria-pressed="true">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 20c2-5 4-6 7-8s5-4 6-8"/><circle cx="5" cy="20" r="1.6" fill="currentColor"/><circle cx="18" cy="4" r="1.6" fill="currentColor"/><path d="M9 21l1.5-3M14 15.5l2.5 1.5"/></svg>
+      </button>
       <button class="fab on" id="lblBtn" aria-label="점 이름 말풍선 끄기·켜기" aria-pressed="true">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"><path d="M4 5h16v11H11l-4 4v-4H4z"/><path d="M8 9.5h8M8 12.5h5"/></svg>
       </button>
@@ -257,7 +263,7 @@ body.labels .pt .lbl{display:block}
    설정 (이 부분만 고치면 됩니다)
    ================================================================== */
 /* 네이버 클라우드 Maps의 Client ID. Application에서 Dynamic Map과 Reverse Geocoding을 선택해야 합니다. */
-const NAVER_KEY_ID = "3n4mm9a976";
+const NAVER_KEY_ID = "";
 
 /* 첫 화면 제목 */
 const PAGE_TITLE = "공사 노선 지도";
@@ -281,6 +287,8 @@ const SHARED_KML = [];
 const DEFAULT_MAP_TYPE = "SATELLITE";
 /* 점 이름·메모 말풍선: 처음 켜진 상태(true) / 꺼진 상태(false) */
 const LABELS_DEFAULT_ON = true;
+/* KML 노선도: 처음 켜진 상태(true) / 꺼진 상태(false) */
+const ROUTES_DEFAULT_ON = true;
 /* 점 이름·메모 말풍선을 보여 줄 최소 확대 단계 (이보다 넓게 보면 겹치지 않도록 숨김) */
 const LABEL_MIN_ZOOM = 14;
 /* 말풍선 메모 최대 글자 수 (설명이 주소이면 말풍선에는 표시하지 않음) */
@@ -977,6 +985,17 @@ function pointIcon(color, name, sel, memo) {
   };
 }
 /* 말풍선은 설정이 켜져 있고, 너무 넓게 보는 단계(노선 전체 보기 등)가 아닐 때만 표시 */
+let routesOn = true;
+function applyLayerMap(L) { setLayerMap(L, L.visible && routesOn ? map : null); }
+function setRoutes(on, notify) {
+  routesOn = !!on;
+  const b = $("#routeBtn");
+  b.classList.toggle("on", routesOn);
+  b.setAttribute("aria-pressed", String(routesOn));
+  if (!routesOn && selected) closeCard();          // 숨긴 노선의 정보 카드는 닫음
+  if (map) layers.forEach(applyLayerMap);
+  if (notify) toast(routesOn ? "노선도 표시 켬" : "노선도 표시 끔", 1600);
+}
 let labelsOn = true;
 function setLabels(on, notify) {
   labelsOn = !!on;
@@ -1036,6 +1055,7 @@ function addLayer(fileName, parsed, opts) {
     L.canvas.setMap(map);
     log(`${fileName}: 선·면 조각 ${stats.parts.toLocaleString("ko-KR")}개 — 대용량 방식으로 표시`);
   }
+  if (!routesOn) setLayerMap(L, null);
   layers.push(L);
   renderLayers();
   if (opts.zoom !== false) zoomTo(L.bbox);
@@ -1453,7 +1473,7 @@ function renderLayers() {
     bVis.onclick = () => {
       L.visible = !L.visible;
       if (!L.visible && selected && selected.layer === L) closeCard();
-      setLayerMap(L, L.visible ? map : null);
+      applyLayerMap(L);
       renderLayers();
     };
     li.append(bGo, bVis);
@@ -1472,10 +1492,10 @@ function setCadastral(on) {
 }
 
 /* ---------------- 내 위치 + 바라보는 방향 ---------------- */
-const ME_HTML = '<div class="me" id="meIcon">' +
-  '<svg class="cone" id="meCone" viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient id="coneG" x1="0" y1="1" x2="0" y2="0">' +
-  '<stop offset="0" stop-color="#1F6FEB" stop-opacity=".55"/><stop offset="1" stop-color="#1F6FEB" stop-opacity="0"/></linearGradient></defs>' +
-  '<path d="M32 32 L17 6 A30 30 0 0 1 47 6 Z" fill="url(#coneG)"/></svg><div class="medot"></div></div>';
+const ME_HTML = '<div class="me" id="meIcon"><div class="halo"></div>' +
+  '<svg class="dir" id="meDir" viewBox="0 0 72 72" aria-hidden="true">' +
+  '<path d="M36 11.5 L43.5 23.5 L28.5 23.5 Z" fill="#1F6FEB" stroke="#fff" stroke-width="2.2" stroke-linejoin="round"/></svg>' +
+  '<div class="medot"></div></div>';
 function screenAngle() {
   if (screen.orientation && typeof screen.orientation.angle === "number") return screen.orientation.angle;
   if (typeof window.orientation === "number") return window.orientation;
@@ -1520,26 +1540,31 @@ function stepHeading() {
   if (headingShown === null) headingShown = headingTarget;
   const diff = ((headingTarget - headingShown + 540) % 360) - 180;
   headingShown = (headingShown + diff * 0.3 + 360) % 360;
-  const cone = document.getElementById("meCone"), icon = document.getElementById("meIcon");
-  if (cone) cone.style.transform = `rotate(${headingShown.toFixed(1)}deg)`;
+  const dir = document.getElementById("meDir"), icon = document.getElementById("meIcon");
+  if (dir) dir.style.transform = `rotate(${headingShown.toFixed(1)}deg)`;
   if (icon) icon.classList.add("has-heading");
   if (Math.abs(diff) > 0.5) kickHeading();
 }
 function startCompass() {
   const noCompass = "방향 센서 값을 받지 못해, 걸어서 이동할 때의 진행 방향으로 표시합니다.";
   const isTouch = ("ontouchstart" in window) || navigator.maxTouchPoints > 0;       // PC에서는 안내를 띄우지 않음
+  let denied = false;
   const attach = () => {
+    if (compassEvt) return;
     compassEvt = ("ondeviceorientationabsolute" in window) ? "deviceorientationabsolute" : "deviceorientation";
     window.addEventListener(compassEvt, onOrientation);
-    setTimeout(() => { if (isTouch && locMode !== "off" && !compassActive) toast(noCompass, 4000); }, 4000);
+    setTimeout(() => { if (isTouch && !denied && locMode !== "off" && !compassActive) toast(noCompass, 4000); }, 4000);
   };
   const DOE = window.DeviceOrientationEvent;
   if (!DOE) { if (isTouch) toast(noCompass, 4000); return; }
-  if (typeof DOE.requestPermission === "function") {
+  if (typeof DOE.requestPermission === "function") {        // 아이폰, 그리고 최근 크롬도 권한 요청 함수가 있음
     DOE.requestPermission().then((st) => {
-      if (st === "granted") attach();
-      else toast("방향 표시를 쓰려면 Safari의 '동작 및 방향' 접근을 허용하세요.", 4000);
-    }).catch(() => {});
+      if (st !== "granted") {
+        denied = true;
+        toast("방향 센서 접근이 허용되지 않았습니다. 브라우저 설정에서 '동작 및 방향(동작 센서)' 접근을 허용하세요. 지금은 이동 방향으로 표시합니다.", 5000);
+      }
+      attach();
+    }).catch(() => attach());
   } else attach();
 }
 function setLocMode(mode) {
@@ -1553,7 +1578,7 @@ function onPos(pos) {
   const c = pos.coords;
   const ll = new naver.maps.LatLng(c.latitude, c.longitude);
   lastPos = ll;
-  if (!meMarker) meMarker = new naver.maps.Marker({ map, position: ll, clickable: false, zIndex: 200, icon: { content: ME_HTML, anchor: new naver.maps.Point(32, 32) } });
+  if (!meMarker) meMarker = new naver.maps.Marker({ map, position: ll, clickable: false, zIndex: 200, icon: { content: ME_HTML, anchor: new naver.maps.Point(36, 36) } });
   else meMarker.setPosition(ll);
   if (naver.maps.Circle) {
     if (!meCircle) meCircle = new naver.maps.Circle({ map, center: ll, radius: c.accuracy, fillColor: "#1F6FEB", fillOpacity: 0.1, strokeColor: "#1F6FEB", strokeOpacity: 0.35, strokeWeight: 1, clickable: false });
@@ -1636,12 +1661,14 @@ document.querySelectorAll("#typeSeg button").forEach((b) => b.onclick = () => se
 $("#cadChk").addEventListener("change", (e) => setCadastral(e.target.checked));
 $("#labelChk").addEventListener("change", (e) => setLabels(e.target.checked, false));
 $("#lblBtn").onclick = () => setLabels(!labelsOn, true);
+$("#routeBtn").onclick = () => setRoutes(!routesOn, true);
 $("#fileInput").addEventListener("change", (e) => { const f = Array.from(e.target.files); e.target.value = ""; closeMenu(); if (f.length) openLocalFiles(f); });
 $("#keyBtn").onclick = () => { const k = $("#keyInput").value.trim(); if (k) prepareSdk(k).then((ok) => ok && toast("지도 준비 완료")); };
 window.addEventListener("popstate", onPopState);
 
 (function boot() {
   setLabels(LABELS_DEFAULT_ON, false);
+  setRoutes(ROUTES_DEFAULT_ON, false);
   document.title = PAGE_TITLE;
   $("#listTitle").textContent = PAGE_TITLE;
   $("#originHint").textContent = `네이버 클라우드 Maps의 Web 서비스 URL에 ${location.protocol === "file:" ? "이 페이지 주소(파일로 직접 열면 동작하지 않음)" : location.origin} 가 등록되어 있어야 합니다.`;
